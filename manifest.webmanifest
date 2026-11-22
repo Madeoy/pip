@@ -1,0 +1,10 @@
+{
+  "name": "Pip — your pocket pet",
+  "short_name": "Pip",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#120d2b",
+  "theme_color": "#120d2b",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
