@@ -56,11 +56,20 @@
     #toast.show { opacity: 1; }
     #arrow { position: absolute; width: 54px; height: 54px; margin: -27px 0 0 -27px; border-radius: 50%; background: var(--grad); display: grid; place-items: center; font-size: 26px; box-shadow: 0 6px 20px rgba(0,0,0,.4); pointer-events: none; }
     #arrow i { display: block; width: 0; height: 0; border-left: 10px solid transparent; border-right: 10px solid transparent; border-bottom: 16px solid #fff; }
+    .meters { display: flex; gap: 8px; padding: 6px 10px; font-size: 14px; }
+    .meters span { display: flex; align-items: center; gap: 3px; }
+    .meters i { display: block; width: 26px; height: 6px; border-radius: 6px; background: rgba(255,255,255,.18); overflow: hidden; }
+    .meters b { display: block; height: 100%; width: 50%; border-radius: 6px; background: #7ee08a; transition: width .5s, background .5s; }
+    .status { position: absolute; left: 50%; top: calc(64px + var(--safe-t)); transform: translateX(-50%); padding: 8px 16px; border-radius: 16px; background: rgba(255,210,94,.92); color: #3a2400; font-weight: 700; font-size: 16px; white-space: nowrap; }
+    .roomchip { position: absolute; right: 12px; top: calc(64px + var(--safe-t)); font-size: 14px; font-weight: 600; }
+    #toast { top: calc(110px + var(--safe-t)); }
     .help { font-size: 13px; color: var(--ink2); text-align: center; margin-top: 6px; }
+    #hud.walking .panel, #hud.walking .top, #hud.walking .roomchip, #hud.walking .status { display: none !important; }
     [hidden] { display: none !important; }
   </style>
 </head>
 <body>
+  <video id="camfeed" playsinline muted autoplay hidden style="position:fixed;inset:0;width:100%;height:100%;object-fit:cover"></video>
   <canvas id="c"></canvas>
   <div id="ui">
     <!-- CREATE -->
@@ -79,9 +88,19 @@
     <!-- PLAY -->
     <div id="hud" hidden>
       <div class="top">
-        <div class="pill" id="petName">Pip</div>
+        <div class="pill" id="petName" role="button">Pip</div>
+        <div class="meters pill" id="meters">
+          <span title="Food">🍪<i><b id="mHunger"></b></i></span>
+          <span title="Water">💧<i><b id="mThirst"></b></i></span>
+          <span title="Energy">⚡<i><b id="mEnergy"></b></i></span>
+          <span title="Happy">💖<i><b id="mFun"></b></i></span>
+        </div>
+        <div class="pill" id="walkBtn" role="button" title="Walk together">👣</div>
         <div class="pill" id="exitBtn" role="button">✕</div>
       </div>
+      <div class="pill" id="walkOff" role="button" hidden style="position:absolute;left:50%;transform:translateX(-50%);bottom:calc(20px + var(--safe-b))">👣 Walking together · tap for controls</div>
+      <div class="status" id="status" hidden></div>
+      <div class="pill roomchip" id="roomChip" hidden>🏠 <span id="roomCount">0</span> spots learned</div>
       <div id="toast"></div>
       <div id="arrow" hidden><i></i></div>
       <div class="panel">
@@ -90,10 +109,10 @@
           <button class="act" id="ballBtn"><span class="i">🎾</span>Ball</button>
           <button class="act" id="treatBtn"><span class="i">🍪</span>Treat</button>
           <button class="mic" id="micBtn" aria-label="Talk">🎤</button>
+          <button class="act" id="waterBtn"><span class="i">🥣</span>Water</button>
           <button class="act" id="hideBtn"><span class="i">🙈</span>Hide</button>
-          <button class="act" id="tricksBtn"><span class="i">⭐</span>Tricks</button>
         </div>
-        <p class="help" id="help">Say: come · sit · spin · jump · fetch · hide · sleep · good job</p>
+        <p class="help" id="help">Say: come · sit · spin · jump · get your ball · hide · nap · good job</p>
       </div>
     </div>
   </div>

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Pet, Ball, makeTreat, Hearts } from './pet.js';
+import { Pet, Ball, makeTreat, makeBowl, Hearts } from './pet.js';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'pip-pet-v1';
@@ -100,6 +100,74 @@ let nextMischief = 45;
 const skills = { come: 0.55, sit: 0.25, spin: 0.15, hop: 0.3, fetch: 0.45, hide: 0.2, sleep: 0.3, ...(saved?.skills || {}) };
 let lastSuccess = null;
 
+/* ---------------- needs: food, water, energy, happiness, tummy ---------------- */
+const needs = { hunger: 80, thirst: 80, energy: 90, fun: 70, tummy: 0, ...(saved?.needs || {}) };
+let sick = !!saved?.sick;
+{ // Time passes while the app is closed (gently).
+  const away = saved?.at ? Math.min(6 * 3600, (Date.now() - saved.at) / 1000) : 0;
+  needs.hunger = Math.max(15, needs.hunger - away * 0.004);
+  needs.thirst = Math.max(15, needs.thirst - away * 0.005);
+  needs.energy = Math.min(100, needs.energy + away * 0.02);
+  needs.tummy = Math.max(0, needs.tummy - away / 90);
+}
+const clamp01 = (v) => Math.max(0, Math.min(100, v));
+function spend(kind, amt) { needs[kind] = clamp01(needs[kind] - amt); }
+let needTalk = 12;
+let napStart = 0;
+let bowl = null;
+
+function updateNeeds(dt) {
+  if (!pet?.parent || mode === 'create') return;
+  const sleeping = pet.state === 'sleep';
+  needs.hunger = clamp01(needs.hunger - dt * 0.12);
+  needs.thirst = clamp01(needs.thirst - dt * (pet.state === 'walk' ? 0.3 : 0.15));
+  needs.fun = clamp01(needs.fun - dt * 0.08);
+  needs.tummy = Math.max(0, needs.tummy - dt / 90);
+  if (sleeping) needs.energy = clamp01(needs.energy + dt * 6);
+  else needs.energy = clamp01(needs.energy - dt * (pet.state === 'walk' ? 0.25 : 0.06));
+
+  // Too many cookies → tummy ache. Water + a nap make it better.
+  if (!sick && needs.tummy >= 4) {
+    sick = true; pet.state = 'idle'; pet.target = null;
+    emote('ugh…', '#b7d98a'); sfx.confused();
+    toast(`${look.name} ate too many cookies and has a tummy ache 🤢`);
+  }
+  if (sick && sleeping && needs.thirst > 60 && performance.now() - napStart > 12000) {
+    sick = false; needs.tummy = 0;
+    pet.state = 'idle'; pet.happy(3); emote('All better!', '#7ee08a');
+    toast(`${look.name} feels better! 💚`);
+  }
+  // Waking up from a nap on its own.
+  if (sleeping && !sick && needs.energy >= 100) { pet.state = 'idle'; pet.hop(); emote('!'); }
+  // Exhausted → falls asleep by itself.
+  if (!sleeping && needs.energy < 6 && ['idle', 'sit'].includes(pet.state) && !hideGame) { goNap(); }
+
+  pet.setCondition({ sick, tired: needs.energy < 25 });
+
+  // Say what it needs, every so often.
+  needTalk -= dt;
+  if (needTalk < 0 && !sleeping && !hideGame) {
+    needTalk = 9 + Math.random() * 6;
+    if (sick) emote(needs.thirst < 60 ? 'water…' : 'tummy hurts', '#b7d98a');
+    else if (needs.thirst < 25) emote('thirsty…', '#5ad1e6');
+    else if (needs.hunger < 25) emote('hungry…', '#ffd25e');
+    else if (needs.energy < 25) emote('*yawn*');
+    else if (needs.fun < 25) emote('play?', '#ff7eb3');
+  }
+}
+function goNap() { pet.target = null; pet.sleep(); napStart = performance.now(); emote('z z z'); }
+
+let meterTick = 0;
+function updateMeters(dt) {
+  meterTick -= dt; if (meterTick > 0) return; meterTick = 0.4;
+  const set = (id, v) => { const b = $(id); b.style.width = `${v}%`; b.style.background = v < 25 ? '#ff6b6b' : v < 50 ? '#ffd25e' : '#7ee08a'; };
+  set('mHunger', needs.hunger); set('mThirst', needs.thirst); set('mEnergy', needs.energy); set('mFun', needs.fun);
+  const st = $('status');
+  const msg = sick ? `${look.name} has a tummy ache 🤢 — water and a nap` : pet?.state === 'sleep' ? `${look.name} is napping 😴` : needs.energy < 25 ? `${look.name} is tired 🥱` : '';
+  st.hidden = !msg; st.textContent = msg;
+  persist();
+}
+
 /* ---------------- creator ---------------- */
 const look = { color: '#ff9f6e', ears: 'pointy', eyes: 1, name: 'Pip', ...(saved?.look || {}) };
 const COLORS = ['#ff9f6e', '#ff7eb3', '#8f7bff', '#5ad1e6', '#7ee08a', '#ffd25e', '#c9c3d6'];
@@ -138,6 +206,7 @@ function refreshPet() {
 /* ---------------- emote bubbles ---------------- */
 function emote(text, color = '#ffffff') {
   if (!pet) return;
+  for (const old of [...emotes.children]) old.life = Math.max(old.life, 1.3);   // fade the previous bubble
   const c = document.createElement('canvas'); c.width = 256; c.height = 128;
   const g = c.getContext('2d');
   g.font = '800 64px "Baloo 2", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
@@ -173,9 +242,13 @@ async function startPlay() {
 
 async function startAR() {
   audio().resume?.();
-  const session = await navigator.xr.requestSession('immersive-ar', {
-    requiredFeatures: ['hit-test'], optionalFeatures: ['dom-overlay', 'local-floor'], domOverlay: { root: $('ui') },
-  }).catch((e) => { toast('AR could not start: ' + e.message); return null; });
+  const base = { requiredFeatures: ['hit-test'], optionalFeatures: ['dom-overlay', 'local-floor'], domOverlay: { root: $('ui') } };
+  // Ask for depth sensing so the pet can hide behind your real furniture; fall back without it.
+  const withDepth = { ...base, optionalFeatures: [...base.optionalFeatures, 'depth-sensing'],
+    depthSensing: { usagePreference: ['cpu-optimized', 'gpu-optimized'], dataFormatPreference: ['luminance-alpha', 'float32'] } };
+  const session = await navigator.xr.requestSession('immersive-ar', withDepth)
+    .catch(() => navigator.xr.requestSession('immersive-ar', base))
+    .catch((e) => { toast('AR could not start: ' + e.message); return null; });
   if (!session) return;
   mode = 'ar'; placed = false;
   room.visible = false; shadowCatcher.visible = true; controls.enabled = false;
@@ -187,9 +260,12 @@ async function startAR() {
   await renderer.xr.setSession(session);
   const viewer = await session.requestReferenceSpace('viewer');
   hitSource = await session.requestHitTestSource({ space: viewer });
+  depthCPU = session.depthUsage === 'cpu-optimized';
+  floorMap.length = 0; $('roomChip').hidden = false; $('roomCount').textContent = '0';
   toast('Slowly point your phone at the floor…');
   session.addEventListener('end', () => {
     $('ui').style.pointerEvents = '';
+    $('roomChip').hidden = true; pet.setVisibility(1); stopHideBuzz(); setWalk(false); placed = false; hideGame = null;
     hitSource = null; mode = 'create'; room.visible = true; shadowCatcher.visible = false; controls.enabled = true; reticle.visible = false;
     renderer.setClearColor('#1a1240', 1); frameCamera('create');
     $('hud').hidden = true; $('create').hidden = false; scene.add(pet); pet.position.set(0, 0, 0); floorY = 0;
@@ -199,6 +275,95 @@ async function startAR() {
   for (const el of document.querySelectorAll('#ui button, #ui .pill, #ui .panel')) el.addEventListener('beforexrselect', (e) => e.preventDefault());
 }
 let hitSource = null;
+let depthCPU = false;
+
+/* ---------------- camera mode (phones without full AR): your camera + gyro ---------------- */
+let camStream = null, orient = null, alphaOffset = null;
+async function startCam() {
+  audio().resume?.();
+  try {
+    const DOE = window.DeviceOrientationEvent;
+    if (DOE && typeof DOE.requestPermission === 'function') await DOE.requestPermission();
+    camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } }, audio: false });
+  } catch (e) { toast('Camera is needed to bring your pet into your room'); return; }
+  const v = $('camfeed'); v.srcObject = camStream; v.hidden = false; await v.play().catch(() => {});
+  mode = 'cam'; placed = true; floorY = 0; alphaOffset = null;
+  room.visible = false; shadowCatcher.visible = true; shadowCatcher.position.y = 0.001; controls.enabled = false;
+  renderer.setClearColor('#000000', 0);
+  camera.fov = 62; camera.updateProjectionMatrix();
+  camera.position.set(0, 1.15, 0); camera.quaternion.identity();
+  // A ring of floor around you the pet can roam and hide on.
+  floorMap.length = 0;
+  for (let i = 0; i < 60; i++) { const a = Math.random() * Math.PI * 2, r = 0.7 + Math.random() * 1.6; floorMap.push(new THREE.Vector3(Math.sin(a) * r, 0, -Math.cos(a) * r)); }
+  pet.position.set(0, 0, -1.0); pet.rotation.y = 0; pet.scale.setScalar(0.01); pet.popIn = 0;
+  $('create').hidden = true; $('hud').hidden = false; setNames();
+  addEventListener('deviceorientation', onOrient);
+  setTimeout(() => { emote('Hi!'); sfx.happy(); }, 300);
+  toast(`Point your phone at the floor — ${look.name} is there! Turn around to look for them.`);
+}
+function onOrient(e) { if (e.alpha == null) return; orient = e; if (alphaOffset == null) alphaOffset = e.alpha; }
+const _euler = new THREE.Euler(), _q0 = new THREE.Quaternion(), _q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)), _z = new THREE.Vector3(0, 0, 1);
+function applyOrientation() {
+  if (!orient) return;
+  const d2r = Math.PI / 180;
+  const screenAngle = (screen.orientation?.angle || 0) * d2r;
+  _euler.set(orient.beta * d2r, (orient.alpha - alphaOffset) * d2r, -orient.gamma * d2r, 'YXZ');
+  const q = new THREE.Quaternion().setFromEuler(_euler).multiply(_q1).multiply(_q0.setFromAxisAngle(_z, -screenAngle));
+  camera.quaternion.slerp(q, 0.5);
+}
+function stopCam() {
+  removeEventListener('deviceorientation', onOrient); orient = null;
+  camStream?.getTracks().forEach((t) => t.stop()); camStream = null; $('camfeed').hidden = true;
+  camera.fov = 55; camera.updateProjectionMatrix();
+  room.visible = true; shadowCatcher.visible = false; controls.enabled = true; renderer.setClearColor('#1a1240', 1);
+}
+
+/* ---------------- learning your room ---------------- */
+// Every floor spot your phone sees gets remembered, so the pet can roam and hide all over the room.
+const floorMap = [];
+function learnFloor(p) {
+  if (placed && Math.abs(p.y - floorY) > 0.08) return;          // only the same floor level
+  if (floorMap.some((q) => (q.x - p.x) ** 2 + (q.z - p.z) ** 2 < 0.09)) return; // keep ~30cm apart
+  if (floorMap.length < 400) { floorMap.push(p.clone()); $('roomCount').textContent = floorMap.length; }
+  if (floorMap.length === 12) toast(`${look.name} is learning your room — walk around! 🏠`);
+}
+let nextRoam = 8;
+function maybeRoam(dt) {
+  if ((mode !== 'ar' && mode !== 'cam') || !placed || pet.state !== 'idle' || pet.target || hideGame || inHand || sick || needs.energy < 25) return;
+  nextRoam -= dt; if (nextRoam > 0) return;
+  nextRoam = 7 + Math.random() * 10;
+  const near = floorMap.filter((q) => q.distanceTo(pet.position) < 2.5 && q.distanceTo(pet.position) > 0.4);
+  if (!near.length) return;
+  pet.goTo(near[Math.floor(Math.random() * near.length)]);
+  if (Math.random() < 0.3) emote(['sniff sniff', 'ooh?', '♪'][Math.floor(Math.random() * 3)]);
+}
+
+/* ---------------- hiding behind real things (depth sensing) ---------------- */
+let occl = 1;
+function updateOcclusion(frame) {
+  if (mode !== 'ar' || !placed || !depthCPU || !frame) { if (occl !== 1) { occl = 1; pet?.setVisibility(1); } return; }
+  const ref = renderer.xr.getReferenceSpace();
+  const pose = frame.getViewerPose(ref); if (!pose) return;
+  const view = pose.views[0];
+  let info = null; try { info = frame.getDepthInformation(view); } catch {}
+  if (!info) return;
+  const xrCam = renderer.xr.getCamera().cameras[0] || camera;
+  const pts = [[0, 0.03, 0], [0, 0.1, 0], [0, 0.17, 0], [0.06, 0.08, 0], [-0.06, 0.08, 0]];
+  let seen = 0;
+  for (const [x, y, z] of pts) {
+    const w = pet.localToWorld(new THREE.Vector3(x, y, z));
+    const camSpace = w.clone().applyMatrix4(xrCam.matrixWorldInverse);
+    const petDepth = -camSpace.z;
+    const ndc = w.clone().project(xrCam);
+    if (petDepth <= 0 || Math.abs(ndc.x) > 1 || Math.abs(ndc.y) > 1) { seen++; continue; }
+    let real = Infinity;
+    try { real = info.getDepthInMeters((ndc.x + 1) / 2, (1 - ndc.y) / 2); } catch {}
+    if (!(real > 0) || real + 0.06 > petDepth) seen++;
+  }
+  const target = seen / pts.length;
+  occl += (target - occl) * 0.25;
+  pet.setVisibility(Math.max(0, Math.min(1, occl)));
+}
 
 const ctrl = renderer.xr.getController(0);
 scene.add(ctrl);
@@ -226,7 +391,7 @@ ctrl.addEventListener('select', () => {
 let downAt = null;
 canvas.addEventListener('pointerdown', (e) => { downAt = { x: e.clientX, y: e.clientY, t: performance.now() }; });
 canvas.addEventListener('pointerup', (e) => {
-  if (!downAt || mode !== 'play') return;
+  if (!downAt || (mode !== 'play' && mode !== 'cam')) return;
   const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
   if (moved < 8 && performance.now() - downAt.t < 400) {
     const ray = new THREE.Raycaster();
@@ -268,6 +433,35 @@ function holdItem(kind) {
 }
 $('ballBtn').onclick = () => holdItem('ball');
 $('treatBtn').onclick = () => holdItem('treat');
+$('waterBtn').onclick = () => placeWater();
+
+function placeWater() {
+  if (!pet?.parent) return;
+  if (!bowl) { bowl = makeBowl(); }
+  scene.add(bowl);
+  bowl.position.copy(frontOfYou(0.4)); bowl.position.y = floorY;
+  bowl.scale.setScalar(0.01); bowl.pop = 0;
+  sfx.chirp(0.8);
+  if (pet.state === 'sleep') { emote('z z z'); return; }
+  setTimeout(() => {
+    if (!bowl.parent || pet.state === 'sleep' || hideGame) return;
+    pet.goTo(bowl.position, needs.thirst < 40, () => {
+      pet.state = 'eat'; emote('slurp');
+      for (let i = 0; i < 5; i++) tone(500, 380, 0.07, 'sine', 0.12, i * 0.22);
+      const t0 = performance.now();
+      const drink = () => {
+        const p = (performance.now() - t0) / 1600;
+        bowl.water.scale.setScalar(Math.max(0.2, 1 - p * 0.8));
+        if (p < 1) return requestAnimationFrame(drink);
+        needs.thirst = 100; pet.state = 'idle';
+        bowl.water.scale.setScalar(1);
+        if (sick) { emote('need a nap…', '#b7d98a'); setTimeout(() => { if (sick && pet.state !== 'sleep') goNap(); }, 1500); }
+        else { pet.happy(1); emote('Ahh!', '#5ad1e6'); }
+      };
+      drink();
+    });
+  }, 500);
+}
 
 // Swipe to throw (anywhere on screen)
 let swipe = null;
@@ -346,6 +540,7 @@ function stepThrown(dt) {
 function onLanded(o) {
   if (!pet || hideGame || pet.state === 'sleep') return;
   if (o.kind === 'treat') {
+    if (sick) { emote('no more cookies…', '#b7d98a'); return; }
     pet.goTo(o.position, true, () => eatTreat(o));
   } else {
     // Always chases. Whether it brings it back depends on training (and mood).
@@ -386,7 +581,13 @@ function eatTreat(o) {
     const p = (performance.now() - t0) / 1200;
     o.scale.setScalar(Math.max(0.01, 1 - p));
     if (p < 1) requestAnimationFrame(shrink);
-    else { removeThrown(o); pet.state = 'idle'; pet.happy(2); emote('Yum!', '#ffd25e'); praise(true); }
+    else {
+      removeThrown(o); pet.state = 'idle';
+      needs.hunger = clamp01(needs.hunger + 25); needs.fun = clamp01(needs.fun + 5); needs.tummy += 1;
+      if (needs.tummy >= 3 && needs.tummy < 4) { emote('so full…', '#ffd25e'); sfx.confused(); }
+      else { pet.happy(2); emote('Yum!', '#ffd25e'); }
+      praise(true);
+    }
   };
   shrink();
 }
@@ -394,6 +595,7 @@ function removeThrown(o) { const i = thrown.indexOf(o); if (i >= 0) thrown.splic
 function clearThrown() { for (const o of [...thrown]) removeThrown(o); if (inHand) { camera.remove(inHand); inHand = null; } }
 
 function frontOfYou(dist = 0.4) {
+  if (mode === 'cam') dist = Math.max(dist, 0.9);
   const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
   const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
   return new THREE.Vector3(cp.x + fwd.x * dist, floorY, cp.z + fwd.z * dist);
@@ -403,9 +605,12 @@ function frontOfYou(dist = 0.4) {
 const TRICK_NAMES = { come: 'Come', sit: 'Sit', spin: 'Spin', hop: 'Jump', fetch: 'Fetch', hide: 'Hide', sleep: 'Nap' };
 function obey(cmd, quiet = false) {
   const s = skills[cmd] ?? 0.3;
+  if (sick) { emote('tummy hurts…', '#b7d98a'); sfx.confused(); return false; }
+  const tiredPenalty = needs.energy < 25 ? 0.3 : 0;
+  if (tiredPenalty && Math.random() < 0.4) { emote('*yawn*'); return false; }
   // A little mischief: sometimes it just runs off!
-  if (Math.random() < 0.07 && cmd !== 'fetch') { runAway(); return false; }
-  if (Math.random() < 0.3 + s * 0.65) return true;
+  if (Math.random() < 0.07 && cmd !== 'fetch' && !tiredPenalty) { runAway(); return false; }
+  if (Math.random() < 0.3 + s * 0.65 - tiredPenalty) return true;
   if (!quiet) {
     // Confused: does the wrong thing or tilts its head.
     if (Math.random() < 0.5) { emote('?'); sfx.confused(); }
@@ -415,6 +620,8 @@ function obey(cmd, quiet = false) {
   return false;
 }
 function success(cmd) {
+  const cost = { fetch: [8, 6, 15], hide: [8, 4, 20], come: [2, 1, 4] }[cmd] || [3, 1, 6];
+  spend('energy', cost[0]); spend('thirst', cost[1]); needs.fun = clamp01(needs.fun + cost[2]);
   skills[cmd] = Math.min(1, (skills[cmd] ?? 0.3) + 0.07);
   lastSuccess = { cmd, t: performance.now() };
   persist();
@@ -428,7 +635,7 @@ function praise(treat = false) {
   }
 }
 const stars = (v) => '★'.repeat(Math.round(v * 5)) + '☆'.repeat(5 - Math.round(v * 5));
-$('tricksBtn').onclick = () => {
+$('petName').onclick = () => {
   toast(Object.entries(TRICK_NAMES).map(([k, n]) => `${n} ${stars(skills[k])}`).slice(0, 4).join('  ·  '));
   setTimeout(() => toast(Object.entries(TRICK_NAMES).map(([k, n]) => `${n} ${stars(skills[k])}`).slice(4).join('  ·  ')), 2800);
 };
@@ -440,7 +647,7 @@ function doTrick(cmd, forced = false) {
     case 'sit': pet.sit(); break;
     case 'spin': pet.spin(); break;
     case 'hop': pet.hop(); break;
-    case 'sleep': pet.sleep(); break;
+    case 'sleep': goNap(); break;
     case 'hide': startHide(); return;
   }
   if (!forced) setTimeout(() => success(cmd), 200);
@@ -454,7 +661,8 @@ function runAway() {
   pet.goTo(p, true, () => { emote('hehe'); setTimeout(() => { if (pet.state === 'idle' && !hideGame) pet.goTo(frontOfYou(0.4)); }, 2500); });
 }
 function clampToPlay(p) {
-  if (mode === 'play') { const d = Math.hypot(p.x, p.z); if (d > 1.5) { p.x *= 1.5 / d; p.z *= 1.5 / d; } }
+  const lim = mode === 'play' ? 1.5 : mode === 'cam' ? 2.4 : Infinity;
+  { const d = Math.hypot(p.x, p.z); if (d > lim) { p.x *= lim / d; p.z *= lim / d; } }
   p.y = floorY; return p;
 }
 
@@ -463,8 +671,19 @@ function startHide(self = false) {
   let spot;
   if (mode === 'play') {
     spot = hidingSpots[Math.floor(Math.random() * hidingSpots.length)].clone();
+  } else if (floorMap.length > 6) {
+    // In your room: pick a learned floor spot that's out of sight, not too far.
+    const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
+    const options = floorMap.filter((q) => {
+      const d = Math.hypot(q.x - cp.x, q.z - cp.z);
+      const ndc = q.clone().setY(floorY + 0.08).project(camera);
+      const outOfView = ndc.z > 1 || Math.abs(ndc.x) > 0.9 || Math.abs(ndc.y) > 0.9;
+      return d > 1 && d < 4.5 && outOfView;
+    });
+    const pool = options.length ? options : floorMap.filter((q) => q.distanceTo(pet.position) > 0.8);
+    spot = (pool.length ? pool : floorMap)[Math.floor(Math.random() * (pool.length || floorMap.length))].clone();
   } else {
-    // In your room: dash somewhere out of view (to the side or behind you).
+    // Room not learned yet: dash somewhere out of view (to the side or behind you).
     const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
     const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
     const ang = (Math.random() < 0.5 ? 1 : -1) * (1.9 + Math.random() * 0.9);
@@ -475,36 +694,98 @@ function startHide(self = false) {
   emote(self ? 'Catch me!' : 'Count to 3!', '#ffd25e'); sfx.happy();
   pet.hideAt(spot);
   hideGame = { since: performance.now() };
-  toast(`${look.name} is hiding! Look around to find them 👀`);
+  toast(canBuzz
+    ? `${look.name} is hiding! Your phone buzzes faster when you're close. Knock knock to tag! 👀`
+    : `${look.name} is hiding! Look around to find them 👀`);
+  startHideBuzz();
 }
 function foundPet() {
-  hideGame = null; $('arrow').hidden = true;
-  pet.state = 'idle'; pet.happy(3); emote('Found me!', '#7ee08a');
+  hideGame = null; $('arrow').hidden = true; stopHideBuzz();
+  buzz([40, 60, 40, 60, 120]);
+  pet.state = 'idle'; pet.setVisibility(1); pet.happy(3); emote('Found me!', '#7ee08a');
+  toast(`You found ${look.name}! 🎉`);
   success('hide');
 }
-$('hideBtn').onclick = () => { if (!hideGame) doTrick('hide', true); };
+
+/* ---------------- buzz: warmer/colder + knock-knock to tag ---------------- */
+const canBuzz = 'vibrate' in navigator;
+const buzz = (p) => { try { navigator.vibrate?.(p); } catch {} };
+let buzzTimer = null;
+function hideDistance() {
+  const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
+  return Math.hypot(pet.position.x - cp.x, pet.position.z - cp.z);
+}
+function startHideBuzz() {
+  stopHideBuzz();
+  const pulse = () => {
+    if (!hideGame) return;
+    const d = mode === 'ar' ? hideDistance() : mode === 'cam' ? 0.6 + lookAngle() * 1.3 : 1.5;
+    if (pet.state === 'hiding') buzz(d < 1 ? 45 : 25);
+    // Closer → faster heartbeat.
+    buzzTimer = setTimeout(pulse, THREE.MathUtils.clamp(180 + (d - 0.6) * 450, 180, 1600));
+  };
+  buzzTimer = setTimeout(pulse, 1200);
+}
+// How far your view is pointing away from the pet (radians).
+function lookAngle() {
+  const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
+  const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd);
+  const to = pet.localToWorld(new THREE.Vector3(0, 0.08, 0)).sub(cp).normalize();
+  return Math.acos(THREE.MathUtils.clamp(fwd.dot(to), -1, 1));
+}
+function stopHideBuzz() { clearTimeout(buzzTimer); buzzTimer = null; }
+
+// Knock twice on your phone (two sharp jolts) to tag the hiding pet.
+let lastKnock = 0, motionArmed = false;
+function armKnock() {
+  if (motionArmed) return; motionArmed = true;
+  const DME = window.DeviceMotionEvent;
+  if (DME && typeof DME.requestPermission === 'function') DME.requestPermission().catch(() => {});
+  addEventListener('devicemotion', (e) => {
+    if (!hideGame || inHand) return;
+    const a = e.acceleration; if (!a) return;
+    const mag = Math.hypot(a.x || 0, a.y || 0, a.z || 0);
+    if (mag < 7 || mag > 30) return;   // a knock: sharp but small (a flick is bigger)
+    const now = performance.now();
+    if (now - lastKnock < 90) return;  // same jolt
+    if (now - lastKnock < 550) { lastKnock = 0; knockKnock(); } else lastKnock = now;
+  });
+}
+function knockKnock() {
+  if (!hideGame || pet.state !== 'hiding') return;
+  const close = mode === 'ar' ? hideDistance() < 1.3 : mode === 'cam' ? lookAngle() < 0.45 : true;
+  const p = pet.localToWorld(new THREE.Vector3(0, 0.08, 0)).project(camera);
+  const inView = p.z < 1 && Math.abs(p.x) < 0.8 && Math.abs(p.y) < 0.8;
+  if (close && (inView || mode === 'play')) foundPet();
+  else { buzz(15); emote('hehe'); toast(close ? 'Close! Point your phone at them and knock again' : 'Not here… keep looking!'); }
+}
+$('hideBtn').onclick = () => { armKnock(); if (!hideGame) doTrick('hide', true); };
 
 function checkFound() {
   // On screen, you find it by tapping it; in your room, by looking at it.
-  if (!hideGame || pet.state !== 'hiding' || mode !== 'ar') return;
+  if (!hideGame || pet.state !== 'hiding' || mode === 'play') return;
   // Found when it's near the middle of your view and reasonably close.
   const p = pet.localToWorld(new THREE.Vector3(0, 0.08, 0)).project(camera);
   const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
-  if (Math.abs(p.x) < 0.45 && Math.abs(p.y) < 0.6 && p.z < 1 && cp.distanceTo(pet.position) < 2.2 && performance.now() - hideGame.since > 2500) foundPet();
+  // Spotting it up close (and actually visible, not behind the couch) counts too.
+  if (Math.abs(p.x) < 0.3 && Math.abs(p.y) < 0.45 && p.z < 1 && cp.distanceTo(pet.position) < (mode === 'cam' ? 3 : 0.9) && occl > 0.6 && performance.now() - hideGame.since > 2500) foundPet();
 }
 
 /* ---------------- voice ---------------- */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, listening = false;
 const COMMANDS = [
+  [/\b(follow|follow me|let's go|lets go|walk)\b/, 'follow'],
   [/\b(come|here|come here|over here)\b/, 'come'],
   [/\b(sit|sit down)\b/, 'sit'],
   [/\b(spin|dance|twirl|turn around)\b/, 'spin'],
   [/\b(jump|hop|up up)\b/, 'hop'],
+  [/\b(get (your|the) ball|go get it|bring it|get it)\b/, 'getball'],
   [/\b(fetch|ball|catch|throw)\b/, 'fetch'],
   [/\b(treat|cookie|hungry|eat|snack)\b/, 'treat'],
+  [/\b(water|drink|thirsty)\b/, 'water'],
   [/\b(hide|seek|hiding|peekaboo)\b/, 'hide'],
-  [/\b(sleep|nap|bed|night night|goodnight|good night)\b/, 'sleep'],
+  [/\b(sleep|nap|rest|bed|night night|goodnight|good night|tired)\b/, 'sleep'],
   [/\b(wake|wake up|get up)\b/, 'wake'],
   [/\b(good|love|cute|best|great job|nice|yay)\b/, 'praise'],
   [/\b(stay|stop|wait|freeze)\b/, 'stay'],
@@ -527,8 +808,17 @@ function onSpeech(text) {
     case 'wake': pet.state = 'idle'; pet.hop(); emote('!'); return;
     case 'stay': pet.target = null; pet.state = 'idle'; emote('ok'); return;
     case 'fetch': holdItem('ball'); emote('!!'); return;
+    case 'getball': {
+      const b = thrown.find((o) => o.kind === 'ball' && !o.held);
+      if (!b) { holdItem('ball'); emote('ball?'); return; }
+      if (!obey('fetch')) return;
+      emote('!'); chase(b, true); return;
+    }
     case 'treat': holdItem('treat'); emote('!!'); return;
-    default: doTrick(cmd);
+    case 'water': placeWater(); return;
+    case 'follow': setWalk(true); return;
+    case 'sleep': if (pet.state !== 'sleep') goNap(); return;
+    default: if (cmd === 'come') zoomUntil = 0; doTrick(cmd);
   }
 }
 function startListening() {
@@ -544,16 +834,61 @@ function startListening() {
 function stopListening() { listening = false; try { rec?.stop(); } catch {} $('micBtn').classList.remove('on'); }
 $('micBtn').onclick = () => (listening ? stopListening() : startListening());
 
+/* ---------------- walk together: no controls, the pet follows you ---------------- */
+let follow = false, followTick = 0, nextZoomies = 18, zoomUntil = 0;
+function setWalk(on) {
+  follow = on;
+  $('hud').classList.toggle('walking', on);
+  $('walkOff').hidden = !on;
+  if (on) {
+    if (pet.state === 'sleep' || pet.state === 'sit') pet.state = 'idle';
+    emote("Let's go!", '#7ee08a'); sfx.happy();
+    if (!listening && SR) startListening();   // so "come back!" works hands-free
+    toast(`Walk around — ${look.name} follows you. Say "come back!" if they run off`);
+  }
+}
+$('walkBtn').onclick = () => setWalk(true);
+$('walkOff').onclick = () => setWalk(false);
+
+function updateFollow(dt) {
+  if (!follow || !pet?.parent || (mode === 'ar' && !placed)) return;
+  if (hideGame || ['sleep', 'eat', 'happy', 'spin', 'hop'].includes(pet.state) || thrown.some((o) => o.held)) return;
+  const now = performance.now();
+  if (now < zoomUntil) return;                       // off on an adventure
+  followTick -= dt; if (followTick > 0) return; followTick = 0.4;
+
+  // Zoomies: every so often it dashes ahead of you.
+  nextZoomies -= 0.4;
+  if (nextZoomies < 0 && needs.energy > 40 && !sick) {
+    nextZoomies = 20 + Math.random() * 25;
+    const ahead = clampToPlay(frontOfYou(mode === 'cam' ? 2.2 : 1.8).add(new THREE.Vector3((Math.random() - 0.5) * 0.8, 0, 0)));
+    emote('zoom!', '#ffd25e'); sfx.chirp(1.6);
+    pet.goTo(ahead, true, () => { pet.hop(); emote('come get me!'); });
+    zoomUntil = now + 5000;
+    return;
+  }
+  // Trot along beside you, a little ahead and to the side.
+  const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
+  const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
+  const side = new THREE.Vector3(-fwd.z, 0, fwd.x);
+  const spot = frontOfYou(0.7).addScaledVector(side, 0.22);
+  const d = Math.hypot(pet.position.x - spot.x, pet.position.z - spot.z);
+  if (d > 0.35) pet.goTo(clampToPlay(spot), d > 1.1);
+}
+
 /* ---------------- HUD ---------------- */
 function setNames() { $('petName').textContent = look.name; document.querySelectorAll('.pn').forEach((e) => (e.textContent = look.name)); }
 $('exitBtn').onclick = () => {
   stopListening(); clearThrown(); hideGame = null; $('arrow').hidden = true;
   if (mode === 'ar') { renderer.xr.getSession()?.end(); return; }
+  if (mode === 'cam') stopCam();
+  stopHideBuzz(); pet.setVisibility(1); placed = false; setWalk(false);
   mode = 'create'; $('hud').hidden = true; $('create').hidden = false; pet.position.set(0, 0, 0); pet.state = 'idle'; pet.target = null;
   frameCamera('create');
 };
 $('goPlay').onclick = startPlay;
-$('goAR').onclick = startAR;
+let xrOK = false;
+$('goAR').onclick = () => (xrOK ? startAR() : startCam());
 let toastTimer;
 function toast(m) { const t = $('toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 3200); }
 function escapeHtml(s) { return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
@@ -577,7 +912,7 @@ function updateArrow() {
 }
 
 /* ---------------- save ---------------- */
-function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify({ look, skills })); } catch {} }
+function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify({ look, skills, needs, sick, at: Date.now() })); } catch {} }
 function load() { try { return JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch { return null; } }
 
 /* ---------------- main loop ---------------- */
@@ -588,13 +923,19 @@ renderer.setAnimationLoop((time, frame) => {
     const ref = renderer.xr.getReferenceSpace();
     const hits = frame.getHitTestResults(hitSource);
     reticle.visible = false;
-    if (hits.length && !placed) {
+    if (hits.length) {
       const pose = hits[0].getPose(ref);
-      reticle.matrix.fromArray(pose.transform.matrix);
-      const up = new THREE.Vector3(0, 1, 0).applyMatrix4(new THREE.Matrix4().extractRotation(reticle.matrix));
-      reticle.visible = up.y > 0.85;
-      if (reticle.visible && !reticle.seen) { reticle.seen = true; toast(`Found the floor! Tap to place ${look.name}`); }
+      const m = new THREE.Matrix4().fromArray(pose.transform.matrix);
+      const up = new THREE.Vector3(0, 1, 0).applyMatrix4(new THREE.Matrix4().extractRotation(m));
+      if (up.y > 0.85) {
+        learnFloor(new THREE.Vector3().setFromMatrixPosition(m));
+        if (!placed) {
+          reticle.matrix.copy(m); reticle.visible = true;
+          if (!reticle.seen) { reticle.seen = true; toast(`Found the floor! Tap to place ${look.name}`); }
+        }
+      }
     }
+    updateOcclusion(frame);
   }
   const camPos = new THREE.Vector3(); camera.getWorldPosition(camPos);
 
@@ -604,15 +945,20 @@ renderer.setAnimationLoop((time, frame) => {
     controls.update();
   } else {
     if (mode === 'play') controls.update();
+    if (mode === 'cam') applyOrientation();
     if (pet && pet.parent) {
       if (pet.popIn !== undefined && pet.popIn < 1) { pet.popIn = Math.min(1, pet.popIn + dt * 3); const s = 1 - Math.pow(1 - pet.popIn, 3) * 1; pet.scale.setScalar(Math.max(0.01, s * (1 + Math.sin(pet.popIn * Math.PI) * 0.15))); }
       pet.update(dt, camPos);
     }
     stepThrown(dt);
     checkFound();
+    updateNeeds(dt); updateMeters(dt);
+    if (pet?.parent) { if (follow) updateFollow(dt); else maybeRoam(dt); }
+    if (bowl && bowl.pop !== undefined && bowl.pop < 1) { bowl.pop = Math.min(1, bowl.pop + dt * 4); bowl.scale.setScalar(Math.max(0.01, bowl.pop)); }
     // Self-started mischief every so often.
     nextMischief -= dt;
-    if (nextMischief < 0 && pet && pet.parent && pet.state === 'idle' && !hideGame && !inHand && thrown.every((o) => !o.held)) {
+    if (nextMischief < 0 && pet && pet.parent && pet.state === 'idle' && !hideGame && !inHand && !sick && needs.energy > 30 && thrown.every((o) => !o.held) && (mode !== 'ar' || placed)) {
+      armKnock();
       nextMischief = 50 + Math.random() * 50;
       if (Math.random() < 0.5) startHide(true); else runAway();
     }
@@ -642,8 +988,11 @@ frameCamera('create');
 buildCreator();
 refreshPet();
 (async () => {
-  const ok = navigator.xr && (await navigator.xr.isSessionSupported('immersive-ar').catch(() => false));
-  $('goAR').hidden = !ok;
-  if (ok) { $('goPlay').className = 'big alt'; $('goPlay').textContent = 'Play on screen instead'; }
-  $('arNote').textContent = ok ? 'Your pet will appear on your real floor.' : 'On an Android phone in Chrome, your pet can walk on your real floor.';
+  xrOK = !!(navigator.xr && (await navigator.xr.isSessionSupported('immersive-ar').catch(() => false)));
+  const hasCam = !!navigator.mediaDevices?.getUserMedia && isTouch;
+  $('goAR').hidden = !(xrOK || hasCam);
+  if (xrOK || hasCam) { $('goPlay').className = 'big alt'; $('goPlay').textContent = 'Play in the cartoon room'; }
+  $('arNote').textContent = xrOK ? 'Full AR: your pet walks on your real floor and learns your room.'
+    : hasCam ? 'Uses your camera. (Full AR needs Chrome + Google Play Services for AR.)'
+    : 'Open this on your phone to bring your pet into your room.';
 })();

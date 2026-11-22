@@ -12,6 +12,9 @@ export class Pet extends THREE.Group {
     this.name = opts.name;
     const furCol = new THREE.Color(opts.color);
     const fur = mat(furCol), belly = mat(opts.belly), dark = mat(furCol.clone().multiplyScalar(0.78)), pink = mat('#ff8fb1', 0.5);
+    this.furMat = fur; this.furColor = furCol.clone(); this.cheekMat = pink;
+    this.speedMul = 1; this.sick = false; this.tired = false;
+    this.allMats = [fur, belly, dark, pink];
     const white = mat('#ffffff', 0.25), black = mat('#1b1430', 0.2);
 
     this.bodyRig = new THREE.Group();          // squash & stretch pivot at the feet
@@ -81,9 +84,23 @@ export class Pet extends THREE.Group {
     this.onArrive = null;
   }
 
+  // Mood visuals: a little green when sick, droopy and slow when tired.
+  setCondition({ sick, tired }) {
+    this.sick = sick; this.tired = tired;
+    this.furMat.color.copy(this.furColor).lerp(new THREE.Color('#9fd16b'), sick ? 0.45 : 0);
+    this.cheekMat.color.set(sick ? '#b7d98a' : '#ff8fb1');
+    this.speedMul = sick ? 0.5 : tired ? 0.65 : 1;
+  }
+
+  // Fade out when hidden behind real furniture (0 = fully hidden).
+  setVisibility(v) {
+    for (const m of this.allMats) { m.transparent = v < 0.99; m.opacity = v; }
+    this.visible = v > 0.02;
+  }
+
   goTo(point, run = false, onArrive = null) {
     this.target = new THREE.Vector3(point.x, this.position.y, point.z);
-    this.speed = run ? 0.75 : 0.42;
+    this.speed = (run ? 0.75 : 0.42) * this.speedMul;
     this.state = 'walk';
     this.onArrive = onArrive;
     this.sfx?.chirp(run ? 1.25 : 1);
@@ -195,7 +212,7 @@ export class Pet extends THREE.Group {
     this.nextBlink -= dt;
     const blink = this.nextBlink < 0.12 ? 0.12 : 1;
     if (this.nextBlink < 0) this.nextBlink = 2 + Math.random() * 4;
-    const closed = this.state === 'sleep' ? 0.1 : 1;
+    const closed = this.state === 'sleep' ? 0.1 : (this.tired || this.sick) ? 0.62 : 1;
     for (const e of this.eyes) {
       e.scale.y = blink * closed * e.baseScale;
       if (cameraPos) {
@@ -236,6 +253,17 @@ export class Ball extends THREE.Mesh {
     if (this.position.y <= floorY + this.r + 0.001 && sp < 0.02) { this.vel.set(0, 0, 0); }
   }
   get resting() { return !this.held && this.vel.lengthSq() < 0.0004; }
+}
+
+export function makeBowl() {
+  const g = new THREE.Group();
+  const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.042, 0.03, 40, 1, true), new THREE.MeshStandardMaterial({ color: '#7c5cff', roughness: 0.5, side: THREE.DoubleSide }));
+  bowl.position.y = 0.015; bowl.castShadow = true;
+  const base = new THREE.Mesh(new THREE.CircleGeometry(0.042, 40), bowl.material); base.rotation.x = -Math.PI / 2; base.position.y = 0.001;
+  const water = new THREE.Mesh(new THREE.CircleGeometry(0.05, 40), new THREE.MeshStandardMaterial({ color: '#5ad1e6', roughness: 0.1, transparent: true, opacity: 0.9 }));
+  water.rotation.x = -Math.PI / 2; water.position.y = 0.024;
+  g.add(bowl, base, water); g.water = water;
+  return g;
 }
 
 export function makeTreat() {
