@@ -69,8 +69,29 @@
     #toast { top: auto; bottom: calc(150px + var(--safe-b)); max-width: calc(100% - 24px); white-space: normal; text-align: center; }
     #hud.voiceonly #toast, #hud.walking #toast { bottom: calc(70px + var(--safe-b)); }
     .help { font-size: 13px; color: var(--ink2); text-align: center; margin-top: 6px; }
-    #hud.walking .panel, #hud.walking .top, #hud.walking .roomchip, #hud.walking .status,
-    #hud.voiceonly .panel, #hud.voiceonly .top, #hud.voiceonly .roomchip, #hud.voiceonly .status { display: none !important; }
+    /* slim dock of small icons */
+    .dock { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(10px + var(--safe-b)); display: flex; align-items: center; gap: 3px; padding: 5px 6px;
+            border-radius: 999px; background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); max-width: calc(100% - 12px); }
+    .ib { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-size: 18px; background: rgba(255,255,255,.08); flex: none; }
+    .ib.on { background: #fff; }
+    .dock .mic { width: 46px; height: 46px; font-size: 22px !important; box-shadow: 0 0 0 3px rgba(255,255,255,.85); flex: none; }
+    .heard { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(66px + var(--safe-b)); margin: 0; padding: 4px 12px; border-radius: 999px; background: rgba(0,0,0,.35); font-size: 13px !important; white-space: nowrap; max-width: calc(100% - 24px); overflow: hidden; text-overflow: ellipsis; }
+    #hud .top { gap: 6px; }
+    #hud .top .pill { padding: 5px 10px; font-size: 14px; }
+    .meters { gap: 5px !important; }
+    .meters i { width: 16px !important; height: 5px !important; }
+    .meters span { font-size: 12px; }
+    .status { top: calc(52px + var(--safe-t)) !important; font-size: 13px !important; padding: 5px 12px !important; }
+    .roomchip { top: calc(52px + var(--safe-t)) !important; font-size: 12px !important; left: 12px; right: auto !important; }
+    #toast { bottom: calc(100px + var(--safe-b)) !important; font-size: 15px !important; }
+    .sheet { position: absolute; inset: 0; display: flex; align-items: flex-end; justify-content: center; background: rgba(6,4,20,.5); }
+    .sheet-card { width: min(100%, 440px); max-height: 70vh; overflow: auto; margin: 0 8px calc(8px + var(--safe-b)); padding: 14px 16px; border-radius: 24px; background: #1d1545; border: 1px solid var(--line); }
+    .sheet-card h3 { margin: 0 0 8px; font-size: 20px; }
+    .trick-row { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
+    .trick-row small { color: var(--ink2); }
+    .trick-row span:last-child { color: #ffd25e; white-space: nowrap; }
+    #hud.walking .dock, #hud.walking .top, #hud.walking .roomchip, #hud.walking .status, #hud.walking .heard,
+    #hud.voiceonly .dock, #hud.voiceonly .top, #hud.voiceonly .roomchip, #hud.voiceonly .status, #hud.voiceonly .heard { display: none !important; }
     #hud.voiceonly.walking #walkOff { display: none !important; }
     [hidden] { display: none !important; }
   </style>
@@ -102,26 +123,32 @@
           <span title="Energy">⚡<i><b id="mEnergy"></b></i></span>
           <span title="Happy">💖<i><b id="mFun"></b></i></span>
         </div>
-        <div class="pill" id="voiceOnlyBtn" role="button" title="Voice only — hide buttons">🎤</div>
-        <div class="pill" id="walkBtn" role="button" title="Walk together">👣</div>
         <div class="pill" id="exitBtn" role="button">✕</div>
       </div>
-      <div class="pill" id="voiceOff" role="button" hidden style="position:absolute;left:50%;transform:translateX(-50%);bottom:calc(20px + var(--safe-b));font-size:15px;opacity:.85">🎤 <span id="voiceHeard">Listening…</span> · tap for buttons</div>
+      <div class="pill" id="voiceOff" role="button" hidden style="position:absolute;left:10px;bottom:calc(10px + var(--safe-b));font-size:13px;opacity:.8;max-width:70%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🎤 <span id="voiceHeard">Listening…</span> ⌃</div>
       <div class="pill" id="walkOff" role="button" hidden style="position:absolute;left:50%;transform:translateX(-50%);bottom:calc(20px + var(--safe-b))">👣 Walking together · tap for controls</div>
       <div class="status" id="status" hidden></div>
       <div class="pill roomchip" id="roomChip" hidden>🏠 <span id="roomCount">0</span> spots learned</div>
       <div id="toast"></div>
       <div id="arrow" hidden><i></i></div>
-      <div class="panel">
-        <p class="heard" id="heard">Tap the mic and talk to <b class="pn">Pip</b></p>
-        <div class="actions">
-          <button class="act" id="ballBtn"><span class="i">🎾</span>Ball</button>
-          <button class="act" id="treatBtn"><span class="i">🍪</span>Treat</button>
-          <button class="mic" id="micBtn" aria-label="Talk">🎤</button>
-          <button class="act" id="waterBtn"><span class="i">🥣</span>Water</button>
-          <button class="act" id="hideBtn"><span class="i">🙈</span>Hide</button>
+      <p class="heard" id="heard">Tap 🎤 and talk to <b class="pn">Pip</b></p>
+      <div class="dock" id="dock">
+        <button class="ib" id="ballBtn" aria-label="Ball">🎾</button>
+        <button class="ib" id="treatBtn" aria-label="Treat">🍪</button>
+        <button class="ib" id="waterBtn" aria-label="Water">🥣</button>
+        <button class="ib" id="bedBtn" aria-label="Place bed">🛏️</button>
+        <button class="mic" id="micBtn" aria-label="Talk">🎤</button>
+        <button class="ib" id="hideBtn" aria-label="Hide and seek">🙈</button>
+        <button class="ib" id="walkBtn" aria-label="Walk together">👣</button>
+        <button class="ib" id="tricksBtn" aria-label="Tricks">⭐</button>
+        <button class="ib" id="voiceOnlyBtn" aria-label="Hide buttons">⌄</button>
+      </div>
+      <div class="sheet" id="tricksSheet" hidden>
+        <div class="sheet-card">
+          <h3>Things to say to <span class="pn">Pip</span></h3>
+          <div id="tricksList"></div>
+          <button class="big alt" id="tricksClose">Done</button>
         </div>
-        <p class="help" id="help">Say: come · sit · spin · jump · get your ball · hide · nap · good job</p>
       </div>
     </div>
   </div>

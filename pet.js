@@ -107,6 +107,62 @@ export class Pet extends THREE.Group {
   }
 
   sit() { this.target = null; this.state = 'sit'; this.sfx?.chirp(0.9); }
+  lieDown() { this.target = null; this.state = 'down'; this.sfx?.chirp(0.8); }
+
+  // Jump to a point at a different height (onto a table, or back down).
+  leapTo(point, onLand) {
+    this.target = null;
+    this.leapFrom = this.position.clone(); this.leapTo = point.clone();
+    const d = Math.hypot(point.x - this.position.x, point.z - this.position.z);
+    this.leapT = 0; this.leapDur = 0.45 + d * 0.5;
+    this.leapH = 0.12 + Math.max(0, point.y - this.position.y) * 0.5;
+    this.state = 'leap'; this.onLand = onLand; this.sfx?.chirp(1.7);
+  }
+
+  static TRICKS = {
+    rollover: 1.3, playdead: 3.2, paw: 1.8, highfive: 1.6, wave: 2.2, speak: 1.0, beg: 2.4, dance: 3.2,
+    bow: 2.0, chasetail: 2.6, jumphigh: 0.9, sing: 2.6, shy: 2.2, stretch: 1.8, sniff: 1.8, scratch: 1.8, shakeoff: 1.1, backflip: 1.0,
+  };
+  trickNow(name) {
+    this.target = null; this.state = 'trick'; this.trick = name; this.trickT = 0; this.trickDur = Pet.TRICKS[name] || 1.5;
+  }
+
+  animateTrick(dt, t, lift, sx, sy) {
+    this.trickT += dt;
+    const p = Math.min(1, this.trickT / this.trickDur);
+    const [fl, fr, bl] = this.feet;
+    const R = this.bodyRig.rotation;
+    this.mouthOpen = false;
+    switch (this.trick) {
+      case 'rollover': R.z = p * Math.PI * 2; lift = Math.sin(p * Math.PI) * 0.035; break;
+      case 'backflip': R.x = -p * Math.PI * 2; lift = Math.sin(p * Math.PI) * 0.16; sy = p < 0.1 ? 0.8 : 1; break;
+      case 'playdead': {
+        const k = p < 0.12 ? p / 0.12 : p > 0.9 ? (1 - p) / 0.1 : 1;
+        R.z = k * 1.45; lift = -k * 0.02; this.eyesShut = k > 0.5;
+        fl.position.y = fl.base.y + k * 0.03; fr.position.y = fr.base.y + k * 0.03; break;
+      }
+      case 'paw': case 'highfive': {
+        const up = Math.sin(Math.min(1, p * 1.6) * Math.PI / 2) * (p > 0.85 ? (1 - p) / 0.15 : 1);
+        fr.position.y = fr.base.y + up * (this.trick === 'highfive' ? 0.1 : 0.055);
+        fr.position.z = fr.base.z + up * 0.03; R.x = -0.18 * up; sy = 1 + 0.05 * up; break;
+      }
+      case 'wave': fr.position.y = fr.base.y + 0.08; fr.position.x = fr.base.x + Math.sin(t * 14) * 0.02; R.x = -0.15; break;
+      case 'speak': this.mouthOpen = Math.sin(p * Math.PI * 3) > 0; lift = Math.max(0, Math.sin(p * Math.PI * 3)) * 0.015; break;
+      case 'beg': sy = 1.16; sx = 0.92; R.x = -0.38; fl.position.y = fl.base.y + 0.05; fr.position.y = fr.base.y + 0.05; fl.position.z = fr.position.z = fl.base.z + 0.02; break;
+      case 'dance': R.z = Math.sin(t * 10) * 0.28; lift = Math.abs(Math.sin(t * 10)) * 0.03; this.rotation.y += Math.sin(t * 5) * dt * 3; this.mouthOpen = true; break;
+      case 'bow': R.x = 0.45 * Math.sin(Math.min(1, p * 3) * Math.PI / 2) * (p > 0.85 ? (1 - p) / 0.15 : 1); break;
+      case 'chasetail': this.rotation.y += dt * 11; lift = Math.abs(Math.sin(t * 22)) * 0.012; break;
+      case 'jumphigh': lift = Math.sin(p * Math.PI) * 0.26; sy = p < 0.12 ? 0.75 : 1.15; sx = 2 - sy; break;
+      case 'sing': this.mouthOpen = Math.sin(t * 9) > 0; R.z = Math.sin(t * 3) * 0.12; sy = 1.05; break;
+      case 'shy': this.eyesShut = true; sy = 0.88; sx = 1.08; R.x = 0.15; this.ears.forEach((e) => (e.rotation.x = 0.5)); break;
+      case 'stretch': R.x = p < 0.5 ? 0.4 * Math.sin(p * 2 * Math.PI) : -0.25 * Math.sin((p - 0.5) * 2 * Math.PI); sx = 1.1; break;
+      case 'sniff': R.x = 0.3 + Math.sin(t * 25) * 0.04; lift = 0; break;
+      case 'scratch': bl.position.y = bl.base.y + 0.03 + Math.sin(t * 30) * 0.015; R.z = -0.2; break;
+      case 'shakeoff': this.bodyRig.rotation.y = Math.sin(t * 45) * 0.35 * (1 - p); break;
+    }
+    if (p >= 1) { this.state = 'idle'; this.mouthOpen = false; R.set(0, 0, 0); }
+    return { lift, sx, sy };
+  }
   spin() { this.target = null; this.state = 'spin'; this.spinLeft = Math.PI * 4; this.sfx?.chirp(1.4); }
   sleep() { this.target = null; this.state = 'sleep'; this.zzz = 0.3; }
   hop() { this.target = null; this.state = 'hop'; this.jump = 0; this.sfx?.chirp(1.5); }
@@ -125,8 +181,22 @@ export class Pet extends THREE.Group {
     const t = this.t;
     let walking = false;
 
+    // Leaping up onto (or down off) a table.
+    if (this.state === 'leap') {
+      this.leapT += dt;
+      const p = Math.min(1, this.leapT / this.leapDur);
+      const e = p * p * (3 - 2 * p);
+      this.position.lerpVectors(this.leapFrom, this.leapTo, e);
+      this.position.y += Math.sin(p * Math.PI) * this.leapH;
+      const to = this.leapTo.clone().sub(this.leapFrom);
+      if (to.x || to.z) this.rotation.y = lerpAngle(this.rotation.y, Math.atan2(to.x, to.z), 1 - Math.exp(-dt * 12));
+      if (p >= 1) { this.state = 'idle'; const cb = this.onLand; this.onLand = null; cb?.(); }
+    }
+
     // Movement
-    if (this.target) {
+    if (this.state === 'leap') {
+      // handled above
+    } else if (this.target) {
       const to = this.target.clone().sub(this.position); to.y = 0;
       const dist = to.length();
       const wantYaw = Math.atan2(to.x, to.z);
@@ -140,10 +210,12 @@ export class Pet extends THREE.Group {
         this.state = 'idle';
         const cb = this.onArrive; this.onArrive = null; cb?.();
       }
-    } else if (!['eat', 'spin', 'sleep', 'hiding'].includes(this.state) && cameraPos) {
-      // Look at you
-      const to = cameraPos.clone().sub(this.position);
-      this.rotation.y = lerpAngle(this.rotation.y, Math.atan2(to.x, to.z), 1 - Math.exp(-dt * 3));
+    } else if (!['eat', 'spin', 'sleep', 'hiding', 'trick'].includes(this.state) && cameraPos) {
+      // Face where we're walking together, otherwise look at you.
+      let yaw;
+      if (this.faceYaw != null) yaw = this.faceYaw;
+      else { const to = cameraPos.clone().sub(this.position); yaw = Math.atan2(to.x, to.z); }
+      this.rotation.y = lerpAngle(this.rotation.y, yaw, 1 - Math.exp(-dt * 3));
     }
 
     // Body animation
@@ -198,21 +270,27 @@ export class Pet extends THREE.Group {
       this.spinLeft -= dt * 9; this.rotation.y += dt * 9; lift = Math.abs(Math.sin(this.spinLeft)) * 0.02;
       if (this.spinLeft <= 0) { this.state = 'idle'; }
     }
+    if (this.state === 'down') { sy = 0.68; sx = 1.18; this.bodyRig.rotation.x = 0.08; }
+    if (this.state === 'leap') { const p = this.leapT / this.leapDur; sy = p < 0.15 ? 0.8 : p > 0.85 ? 0.85 : 1.12; sx = 2 - sy; }
+    this.eyesShut = false;
+    this.bodyRig.rotation.y *= 0.8;
+    if (this.state === 'trick') ({ lift, sx, sy } = this.animateTrick(dt, t, lift, sx, sy));
 
     this.bodyRig.position.y = lift;
     this.bodyRig.scale.set(sx, sy, sx);
 
     // Ears, tail, mouth
     this.ears.forEach((e, i) => { e.rotation.x = Math.sin(t * 3 + i) * 0.08 - (walking ? 0.2 : 0); });
-    this.tail.rotation.y = Math.sin(t * (this.state === 'happy' ? 22 : 6)) * 0.6;
-    const mouthOpen = this.state === 'happy' || this.state === 'eat' ? 1.4 : 0.5;
+    const wag = this.state === 'happy' || (this.state === 'trick' && ['bow', 'beg', 'dance', 'speak'].includes(this.trick));
+    this.tail.rotation.y = Math.sin(t * (wag ? 22 : 6)) * 0.6;
+    const mouthOpen = this.state === 'happy' || this.state === 'eat' || this.mouthOpen ? 1.4 : 0.5;
     this.mouth.scale.y += (mouthOpen - this.mouth.scale.y) * 0.2;
 
     // Eyes: blink + look at camera
     this.nextBlink -= dt;
     const blink = this.nextBlink < 0.12 ? 0.12 : 1;
     if (this.nextBlink < 0) this.nextBlink = 2 + Math.random() * 4;
-    const closed = this.state === 'sleep' ? 0.1 : (this.tired || this.sick) ? 0.62 : 1;
+    const closed = this.state === 'sleep' || this.eyesShut ? 0.1 : (this.tired || this.sick) ? 0.62 : 1;
     for (const e of this.eyes) {
       e.scale.y = blink * closed * e.baseScale;
       if (cameraPos) {
