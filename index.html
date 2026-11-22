@@ -47,7 +47,11 @@
     .actions { display: flex; justify-content: space-around; align-items: center; }
     .act { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 13px; color: var(--ink2); width: 66px; }
     .act span.i { font-size: 30px; line-height: 1.1; }
-    .mic { width: 78px; height: 78px; border-radius: 50%; background: var(--grad); display: grid; place-items: center; box-shadow: 0 0 0 4px rgba(255,255,255,.85), 0 12px 30px rgba(255,95,162,.5); font-size: 34px; transition: transform .2s; }
+    #hud .panel { padding: 8px 12px 10px; width: min(calc(100% - 20px), 400px); }
+    #hud .heard { font-size: 14px; margin-bottom: 2px; min-height: 20px; }
+    #hud .help { display: none; }
+    #hud .act span.i { font-size: 24px; }
+    .mic { width: 60px; height: 60px; font-size: 26px !important; border-radius: 50%; background: var(--grad); display: grid; place-items: center; box-shadow: 0 0 0 4px rgba(255,255,255,.85), 0 12px 30px rgba(255,95,162,.5); font-size: 34px; transition: transform .2s; }
     .mic.on { animation: listen 1.2s ease-in-out infinite; }
     @keyframes listen { 50% { transform: scale(1.08); box-shadow: 0 0 0 8px rgba(255,255,255,.5), 0 12px 40px rgba(255,95,162,.8); } }
     .heard { min-height: 24px; text-align: center; font-size: 16px; margin: 0 0 6px; color: var(--ink2); }
@@ -62,9 +66,12 @@
     .meters b { display: block; height: 100%; width: 50%; border-radius: 6px; background: #7ee08a; transition: width .5s, background .5s; }
     .status { position: absolute; left: 50%; top: calc(64px + var(--safe-t)); transform: translateX(-50%); padding: 8px 16px; border-radius: 16px; background: rgba(255,210,94,.92); color: #3a2400; font-weight: 700; font-size: 16px; white-space: nowrap; }
     .roomchip { position: absolute; right: 12px; top: calc(64px + var(--safe-t)); font-size: 14px; font-weight: 600; }
-    #toast { top: calc(110px + var(--safe-t)); }
+    #toast { top: auto; bottom: calc(150px + var(--safe-b)); max-width: calc(100% - 24px); white-space: normal; text-align: center; }
+    #hud.voiceonly #toast, #hud.walking #toast { bottom: calc(70px + var(--safe-b)); }
     .help { font-size: 13px; color: var(--ink2); text-align: center; margin-top: 6px; }
-    #hud.walking .panel, #hud.walking .top, #hud.walking .roomchip, #hud.walking .status { display: none !important; }
+    #hud.walking .panel, #hud.walking .top, #hud.walking .roomchip, #hud.walking .status,
+    #hud.voiceonly .panel, #hud.voiceonly .top, #hud.voiceonly .roomchip, #hud.voiceonly .status { display: none !important; }
+    #hud.voiceonly.walking #walkOff { display: none !important; }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -95,9 +102,11 @@
           <span title="Energy">⚡<i><b id="mEnergy"></b></i></span>
           <span title="Happy">💖<i><b id="mFun"></b></i></span>
         </div>
+        <div class="pill" id="voiceOnlyBtn" role="button" title="Voice only — hide buttons">🎤</div>
         <div class="pill" id="walkBtn" role="button" title="Walk together">👣</div>
         <div class="pill" id="exitBtn" role="button">✕</div>
       </div>
+      <div class="pill" id="voiceOff" role="button" hidden style="position:absolute;left:50%;transform:translateX(-50%);bottom:calc(20px + var(--safe-b));font-size:15px;opacity:.85">🎤 <span id="voiceHeard">Listening…</span> · tap for buttons</div>
       <div class="pill" id="walkOff" role="button" hidden style="position:absolute;left:50%;transform:translateX(-50%);bottom:calc(20px + var(--safe-b))">👣 Walking together · tap for controls</div>
       <div class="status" id="status" hidden></div>
       <div class="pill roomchip" id="roomChip" hidden>🏠 <span id="roomCount">0</span> spots learned</div>

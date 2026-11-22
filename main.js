@@ -265,7 +265,7 @@ async function startAR() {
   toast('Slowly point your phone at the floor…');
   session.addEventListener('end', () => {
     $('ui').style.pointerEvents = '';
-    $('roomChip').hidden = true; pet.setVisibility(1); stopHideBuzz(); setWalk(false); placed = false; hideGame = null;
+    $('roomChip').hidden = true; pet.setVisibility(1); stopHideBuzz(); setWalk(false); setVoiceOnly(false); placed = false; hideGame = null;
     hitSource = null; mode = 'create'; room.visible = true; shadowCatcher.visible = false; controls.enabled = true; reticle.visible = false;
     renderer.setClearColor('#1a1240', 1); frameCamera('create');
     $('hud').hidden = true; $('create').hidden = false; scene.add(pet); pet.position.set(0, 0, 0); floorY = 0;
@@ -775,6 +775,8 @@ function checkFound() {
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, listening = false;
 const COMMANDS = [
+  [/\b(show (the )?(buttons|controls)|buttons)\b/, 'buttons'],
+  [/\b(play catch|catch)\b/, 'fetch'],
   [/\b(follow|follow me|let's go|lets go|walk)\b/, 'follow'],
   [/\b(come|here|come here|over here)\b/, 'come'],
   [/\b(sit|sit down)\b/, 'sit'],
@@ -793,6 +795,7 @@ const COMMANDS = [
 function onSpeech(text) {
   const t = text.toLowerCase();
   $('heard').innerHTML = `You said: <b>${escapeHtml(text)}</b>`;
+  $('voiceHeard').textContent = `"${text}"`;
   if (!pet || (mode === 'ar' && !placed)) return;
   const hit = COMMANDS.find(([re]) => re.test(t));
   if (!hit) {
@@ -807,14 +810,15 @@ function onSpeech(text) {
     case 'praise': sfx.happy(); pet.happy(2); emote('♥', '#ff7eb3'); praise(); return;
     case 'wake': pet.state = 'idle'; pet.hop(); emote('!'); return;
     case 'stay': pet.target = null; pet.state = 'idle'; emote('ok'); return;
-    case 'fetch': holdItem('ball'); emote('!!'); return;
+    case 'fetch': (voiceOnly || follow) ? autoThrow('ball') : holdItem('ball'); emote('!!'); return;
+    case 'buttons': setVoiceOnly(false); if (follow) setWalk(false); return;
     case 'getball': {
       const b = thrown.find((o) => o.kind === 'ball' && !o.held);
       if (!b) { holdItem('ball'); emote('ball?'); return; }
       if (!obey('fetch')) return;
       emote('!'); chase(b, true); return;
     }
-    case 'treat': holdItem('treat'); emote('!!'); return;
+    case 'treat': if (sick) { emote('no more cookies…', '#b7d98a'); return; } (voiceOnly || follow) ? autoThrow('treat') : holdItem('treat'); emote('!!'); return;
     case 'water': placeWater(); return;
     case 'follow': setWalk(true); return;
     case 'sleep': if (pet.state !== 'sleep') goNap(); return;
@@ -848,6 +852,25 @@ function setWalk(on) {
   }
 }
 $('walkBtn').onclick = () => setWalk(true);
+
+/* ---------------- voice-only: hide every button, talk to it ---------------- */
+let voiceOnly = false;
+function setVoiceOnly(on) {
+  voiceOnly = on;
+  $('hud').classList.toggle('voiceonly', on);
+  $('voiceOff').hidden = !on;
+  if (on) {
+    if (!listening && SR) startListening();
+    toast(`Just talk: "play catch", "want a treat?", "water", "hide and seek", "follow me"`);
+  }
+}
+$('voiceOnlyBtn').onclick = () => setVoiceOnly(true);
+$('voiceOff').onclick = () => { setVoiceOnly(false); if (follow) setWalk(false); };
+// With no buttons to swipe, voice commands toss things for you.
+function autoThrow(kind) {
+  holdItem(kind);
+  setTimeout(() => throwHeld(0.45 + Math.random() * 0.25, (Math.random() - 0.5) * 0.6), 450);
+}
 $('walkOff').onclick = () => setWalk(false);
 
 function updateFollow(dt) {
@@ -882,7 +905,7 @@ $('exitBtn').onclick = () => {
   stopListening(); clearThrown(); hideGame = null; $('arrow').hidden = true;
   if (mode === 'ar') { renderer.xr.getSession()?.end(); return; }
   if (mode === 'cam') stopCam();
-  stopHideBuzz(); pet.setVisibility(1); placed = false; setWalk(false);
+  stopHideBuzz(); pet.setVisibility(1); placed = false; setWalk(false); setVoiceOnly(false);
   mode = 'create'; $('hud').hidden = true; $('create').hidden = false; pet.position.set(0, 0, 0); pet.state = 'idle'; pet.target = null;
   frameCamera('create');
 };
@@ -979,7 +1002,8 @@ addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; cam
 function frameCamera(which) {
   const portrait = innerHeight > innerWidth;
   if (which === 'create') { camera.position.set(0, 0.2, portrait ? 1.0 : 0.62); controls.target.set(0, portrait ? -0.07 : 0.06, 0); }
-  else { camera.position.set(0, 0.5, portrait ? 1.25 : 0.85); controls.target.set(0, portrait ? -0.12 : 0.02, -0.1); }
+  // Aim below the pet so it sits in the upper-middle of the screen, clear of the bottom panel.
+  else { camera.position.set(0, 0.45, portrait ? 1.1 : 0.78); controls.target.set(0, portrait ? -0.14 : -0.06, 0.06); }
   controls.update();
 }
 
