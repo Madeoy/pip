@@ -174,29 +174,71 @@ function updateMeters(dt) {
 }
 
 /* ---------------- creator ---------------- */
-const look = { color: '#ff9f6e', ears: 'pointy', eyes: 1, name: 'Pip', ...(saved?.look || {}) };
-const COLORS = ['#ff9f6e', '#ff7eb3', '#8f7bff', '#5ad1e6', '#7ee08a', '#ffd25e', '#c9c3d6'];
-const EARS = [['pointy', 'Pointy'], ['round', 'Round'], ['bunny', 'Bunny']];
-const EYES = [[0.8, 'Small'], [1, 'Normal'], [1.3, 'Big']];
+const PART_KEYS = ['color', 'belly', 'ears', 'earColor', 'feetColor', 'maneColor', 'wingColor', 'snout', 'nose', 'tail', 'pattern', 'extra'];
+const look = { animal: 'blob', eyes: 1, accessory: 'none', name: 'Pip', ...strip(Pet.ANIMALS.blob), ...(saved?.look || {}) };
+function strip(a) { const { emoji, ...rest } = a; return rest; }
+const COLORS = ['#ff9f6e', '#ff7eb3', '#ffb3c7', '#8f7bff', '#5ad1e6', '#7ee08a', '#5ac88a', '#ffd25e', '#ffcc66', '#e0a96d', '#8a5a33', '#c9c3d6', '#9aa3ad', '#f4f1f8', '#2a2a3a', '#ff5252'];
+const BELLIES = ['#ffe2c4', '#ffffff', '#fff1dc', '#ffd1e0', '#e8ffd9', '#d9d2ff', '#d9b48a', '#2a2a3a'];
+const PARTS = [
+  ['Ears', 'ears', [['pointy', 'Pointy'], ['round', 'Round'], ['bunny', 'Bunny'], ['floppy', 'Floppy'], ['koala', 'Fluffy'], ['mouse', 'Big round'], ['tiny', 'Tiny'], ['tufts', 'Tufts'], ['none', 'None']]],
+  ['Eyes', 'eyes', [[0.8, 'Small'], [1, 'Normal'], [1.3, 'Big'], [1.6, 'Huge']]],
+  ['Snout', 'snout', [['none', 'None'], ['dog', 'Puppy'], ['bear', 'Bear'], ['pig', 'Piggy'], ['beak', 'Beak']]],
+  ['Nose', 'nose', [['pink', 'Pink'], ['black', 'Black'], ['koala', 'Big'], ['none', 'None']]],
+  ['Tail', 'tail', [['puff', 'Puff'], ['long', 'Long'], ['fluffy', 'Fluffy'], ['curly', 'Curly'], ['thin', 'Thin'], ['spiky', 'Dragon'], ['none', 'None']]],
+  ['Pattern', 'pattern', [['none', 'None'], ['spots', 'Spots'], ['stripes', 'Stripes'], ['panda', 'Eye patches'], ['mask', 'Face mask']]],
+  ['Extra', 'extra', [['none', 'None'], ['whiskers', 'Whiskers'], ['mane', 'Mane'], ['horn', 'Horn'], ['unicorn', 'Unicorn'], ['horns', 'Horns'], ['wings', 'Wings'], ['dragon', 'Dragon'], ['frogeyes', 'Frog eyes']]],
+];
+const STYLES = [['none', 'Nothing'], ['bow', '🎀 Bow'], ['santa', '🎅 Santa hat'], ['scarf', '🧣 Scarf'], ['partyhat', '🥳 Party hat'], ['crown', '👑 Crown'], ['glasses', '👓 Glasses'], ['flower', '🌼 Flower']];
+let tab = 'animal';
 
 function buildCreator() {
-  const colors = $('colors');
-  for (const c of COLORS) {
-    const b = document.createElement('button'); b.className = 'swatch'; b.style.background = c;
-    b.onclick = () => { look.color = c; refreshPet(); mark(); }; b.dataset.v = c; colors.appendChild(b);
-  }
-  for (const [v, l] of EARS) { const b = chip(l, () => { look.ears = v; refreshPet(); mark(); }); b.dataset.v = v; $('ears').appendChild(b); }
-  for (const [v, l] of EYES) { const b = chip(l, () => { look.eyes = v; refreshPet(); mark(); }); b.dataset.v = v; $('eyes').appendChild(b); }
+  for (const b of document.querySelectorAll('#tabs button')) b.onclick = () => { tab = b.dataset.tab; renderTab(); };
   $('name').value = look.name;
   $('name').oninput = () => { look.name = $('name').value.trim() || 'Pip'; };
-  mark();
+  $('randomBtn').onclick = () => {
+    const names = Object.keys(Pet.ANIMALS);
+    pickAnimal(names[Math.floor(Math.random() * names.length)], false);
+    if (Math.random() < 0.6) look.color = COLORS[Math.floor(Math.random() * COLORS.length)];
+    look.accessory = STYLES[Math.floor(Math.random() * STYLES.length)][0];
+    look.eyes = [0.8, 1, 1.3, 1.6][Math.floor(Math.random() * 4)];
+    refreshPet(); renderTab();
+  };
+  renderTab();
 }
-function chip(label, fn) { const b = document.createElement('button'); b.className = 'chip'; b.textContent = label; b.onclick = fn; return b; }
-function mark() {
-  for (const b of $('colors').querySelectorAll('.swatch')) b.classList.toggle('on', b.dataset.v === look.color);
-  for (const b of $('ears').querySelectorAll('.chip')) b.classList.toggle('on', b.dataset.v === look.ears);
-  for (const b of $('eyes').querySelectorAll('.chip')) b.classList.toggle('on', +b.dataset.v === look.eyes);
+function pickAnimal(key, refresh = true) {
+  for (const k of PART_KEYS) delete look[k];
+  Object.assign(look, strip(Pet.ANIMALS[key])); look.animal = key;
+  if (refresh) { refreshPet(); renderTab(); }
 }
+function renderTab() {
+  for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('on', b.dataset.tab === tab);
+  const box = $('tabbody'); box.innerHTML = '';
+  const label = (t) => { const l = document.createElement('div'); l.className = 'opt-label'; l.textContent = t; box.appendChild(l); };
+  const grid = () => { const g = document.createElement('div'); g.className = 'grid'; box.appendChild(g); return g; };
+  if (tab === 'animal') {
+    const g = grid();
+    for (const [k, a] of Object.entries(Pet.ANIMALS)) {
+      const b = document.createElement('button'); b.className = 'animal' + (look.animal === k ? ' on' : ''); b.textContent = a.emoji; b.title = k;
+      b.onclick = () => pickAnimal(k); g.appendChild(b);
+    }
+  } else if (tab === 'colors') {
+    label('Body'); let g = grid();
+    for (const c of COLORS) g.appendChild(swatch(c, look.color === c, () => { look.color = c; refreshPet(); renderTab(); }));
+    label('Tummy'); g = grid();
+    for (const c of BELLIES) g.appendChild(swatch(c, look.belly === c, () => { look.belly = c; refreshPet(); renderTab(); }));
+  } else if (tab === 'parts') {
+    for (const [name, key, opts] of PARTS) {
+      label(name); const g = grid();
+      for (const [v, l] of opts) g.appendChild(chip(l, () => { look[key] = v; if (key === 'ears') delete look.earColor; refreshPet(); renderTab(); }, look[key] === v));
+    }
+  } else {
+    label('Wear something'); const g = grid();
+    for (const [v, l] of STYLES) g.appendChild(chip(l, () => { look.accessory = v; refreshPet(); renderTab(); }, look.accessory === v));
+  }
+}
+function swatch(c, on, fn) { const b = document.createElement('button'); b.className = 'swatch' + (on ? ' on' : ''); b.style.background = c; b.onclick = fn; return b; }
+function chip(label, fn, on = false) { const b = document.createElement('button'); b.className = 'chip' + (on ? ' on' : ''); b.textContent = label; b.onclick = fn; return b; }
+function mark() { renderTab(); }
 function refreshPet() {
   const keep = pet ? { p: pet.position.clone(), r: pet.rotation.y } : null;
   if (pet) scene.remove(pet);
@@ -255,6 +297,7 @@ async function startAR() {
     .catch(() => navigator.xr.requestSession('immersive-ar', base))
     .catch((e) => { toast('AR could not start: ' + e.message); return null; });
   if (!session) return;
+  camera.clearViewOffset();
   mode = 'ar'; placed = false;
   room.visible = false; shadowCatcher.visible = true; controls.enabled = false;
   renderer.setClearColor('#000000', 0);
@@ -292,6 +335,7 @@ async function startCam() {
     camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } }, audio: false });
   } catch (e) { toast('Camera is needed to bring your pet into your room'); return; }
   const v = $('camfeed'); v.srcObject = camStream; v.hidden = false; await v.play().catch(() => {});
+  camera.clearViewOffset();
   mode = 'cam'; placed = true; floorY = 0; alphaOffset = null;
   room.visible = false; shadowCatcher.visible = true; shadowCatcher.position.y = 0.001; controls.enabled = false;
   renderer.setClearColor('#000000', 0);
@@ -1229,14 +1273,17 @@ renderer.setAnimationLoop((time, frame) => {
   renderer.render(scene, camera);
 });
 
-addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); if (mode === 'create') frameCamera('create'); });
 
 // Frame the pet above the bottom panel on tall phone screens.
 function frameCamera(which) {
   const portrait = innerHeight > innerWidth;
-  if (which === 'create') { camera.position.set(0, 0.2, portrait ? 1.0 : 0.62); controls.target.set(0, portrait ? -0.07 : 0.06, 0); }
+  if (which === 'create') {
+    camera.position.set(0, 0.18, portrait ? 0.78 : 0.62); controls.target.set(0, 0.08, 0);
+    if (portrait) camera.setViewOffset(innerWidth, innerHeight, 0, innerHeight * 0.2, innerWidth, innerHeight); else camera.clearViewOffset();
+  }
   // Aim below the pet so it sits in the upper-middle of the screen, clear of the bottom panel.
-  else { camera.position.set(0, 0.45, portrait ? 1.1 : 0.78); controls.target.set(0, portrait ? -0.14 : -0.06, 0.06); }
+  else { camera.clearViewOffset(); camera.position.set(0, 0.45, portrait ? 1.1 : 0.78); controls.target.set(0, portrait ? -0.14 : -0.06, 0.06); }
   controls.update();
 }
 

@@ -8,68 +8,203 @@ export class Pet extends THREE.Group {
   constructor(sfx, opts = {}) {
     super();
     this.sfx = sfx;
-    this.opts = opts = { color: '#ff9f6e', belly: '#ffe2c4', ears: 'pointy', eyes: 1, name: 'Pip', ...opts };
+    this.opts = opts = {
+      color: '#ff9f6e', belly: '#ffe2c4', ears: 'pointy', eyes: 1, name: 'Pip', snout: 'none', nose: 'pink',
+      tail: 'puff', pattern: 'none', extra: 'none', accessory: 'none', size: 1, ...opts,
+    };
     this.name = opts.name;
+    this.allMats = [];
+    const m = (c, r = 0.65) => { const x = mat(c, r); this.allMats.push(x); return x; };
     const furCol = new THREE.Color(opts.color);
-    const fur = mat(furCol), belly = mat(opts.belly), dark = mat(furCol.clone().multiplyScalar(0.78)), pink = mat('#ff8fb1', 0.5);
+    const fur = m(furCol), belly = m(opts.belly), dark = m(furCol.clone().multiplyScalar(0.72)), pink = m('#ff8fb1', 0.5);
+    const white = m('#ffffff', 0.25), black = m('#1b1430', 0.2);
+    const earCol = opts.earColor ? m(opts.earColor) : fur;
     this.furMat = fur; this.furColor = furCol.clone(); this.cheekMat = pink;
     this.speedMul = 1; this.sick = false; this.tired = false;
-    this.allMats = [fur, belly, dark, pink];
-    const white = mat('#ffffff', 0.25), black = mat('#1b1430', 0.2);
-
+    this.scale.setScalar(1);
     this.bodyRig = new THREE.Group();          // squash & stretch pivot at the feet
     this.add(this.bodyRig);
-    const body = ball(0.09, fur, 48); body.position.y = 0.09; body.scale.set(1, 0.92, 1);
-    const tummy = ball(0.066, belly); tummy.position.set(0, 0.078, 0.042); tummy.scale.set(1, 1, 0.75);
-    this.bodyRig.add(body, tummy);
+    const R = this.bodyRig;
+    const add = (mesh, x, y, z) => { mesh.position.set(x, y, z); R.add(mesh); return mesh; };
 
-    // Face
+    // Body + tummy
+    const body = add(ball(0.09, fur, 48), 0, 0.09, 0); body.scale.set(1, 0.92, 1);
+    if (opts.belly !== opts.color) { const t = add(ball(0.066, belly), 0, 0.078, 0.042); t.scale.set(1, 1, 0.75); }
+
+    // Patterns
+    if (opts.pattern === 'panda') {
+      for (const s of [-1, 1]) { const p = add(ball(0.026, black), 0.035 * s, 0.116, 0.062); p.scale.set(1, 1.25, 0.6); p.rotation.z = 0.5 * s; }
+    } else if (opts.pattern === 'spots') {
+      for (let i = 0; i < 7; i++) {
+        const a = i * 1.7 + 0.5, h = 0.05 + (i % 3) * 0.035;
+        const sp = add(ball(0.014 + (i % 2) * 0.006, dark), Math.sin(a) * 0.085, h, Math.cos(a) * 0.085 - 0.01); sp.scale.set(1, 1, 0.35); sp.lookAt(0, h, 0);
+      }
+    } else if (opts.pattern === 'mask') {
+      const mk = add(ball(0.06, belly), 0, 0.095, 0.055); mk.scale.set(1.2, 0.7, 0.6);
+    } else if (opts.pattern === 'stripes') {
+      for (let i = 0; i < 4; i++) { const st = add(new THREE.Mesh(new THREE.TorusGeometry(0.088 - i * 0.004, 0.006, 8, 40, Math.PI), dark), 0, 0.15 - i * 0.025, -0.01); st.rotation.x = Math.PI / 2; st.rotation.z = Math.PI; }
+    }
+
+    // Eyes
     this.eyes = [];
+    const eyeY = opts.ears === 'none' && opts.extra === 'frogeyes' ? 0.17 : 0.118;
     for (const s of [-1, 1]) {
-      const eye = new THREE.Group(); eye.position.set(0.034 * s, 0.118, 0.07); eye.scale.setScalar(opts.eyes); eye.baseScale = opts.eyes;
+      const eye = new THREE.Group(); eye.position.set(0.034 * s, eyeY, 0.07); eye.scale.setScalar(opts.eyes); eye.baseScale = opts.eyes;
+      if (opts.extra === 'frogeyes') { const bump = ball(0.03, fur); bump.position.set(0, -0.004, -0.012); eye.add(bump); }
       const w = ball(0.022, white); w.scale.set(1, 1.1, 0.7);
       const p = ball(0.0135, black); p.position.z = 0.012;
       const h = ball(0.0045, white); h.position.set(0.004, 0.006, 0.024);
       eye.add(w, p, h); eye.pupil = p; eye.shine = h;
-      this.bodyRig.add(eye); this.eyes.push(eye);
-      const cheek = ball(0.013, pink); cheek.position.set(0.058 * s, 0.092, 0.06); cheek.scale.set(1, 0.6, 0.4);
-      this.bodyRig.add(cheek);
+      R.add(eye); this.eyes.push(eye);
+      const cheek = add(ball(0.013, pink), 0.058 * s, 0.09, 0.06); cheek.scale.set(1, 0.6, 0.4);
     }
-    this.mouth = ball(0.011, black); this.mouth.position.set(0, 0.094, 0.083); this.mouth.scale.set(1.4, 0.5, 0.5);
-    this.bodyRig.add(this.mouth);
+
+    // Snout / beak / nose
+    let mouthZ = 0.083, mouthY = 0.094;
+    if (opts.snout === 'dog' || opts.snout === 'bear') {
+      const sn = add(ball(opts.snout === 'bear' ? 0.03 : 0.027, belly), 0, 0.09, 0.078); sn.scale.set(1.15, 0.8, 0.9);
+      mouthZ = 0.1; mouthY = 0.082;
+    } else if (opts.snout === 'pig') {
+      const sn = add(new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.024, 0.02, 32), pink), 0, 0.092, 0.088); sn.rotation.x = Math.PI / 2;
+      for (const s of [-1, 1]) add(ball(0.005, dark), 0.008 * s, 0.092, 0.099);
+      mouthY = 0.068;
+    } else if (opts.snout === 'beak') {
+      const bk = add(new THREE.Mesh(new THREE.ConeGeometry(0.016, 0.035, 20), m('#ffb347', 0.5)), 0, 0.094, 0.095); bk.rotation.x = Math.PI / 2;
+      mouthY = 0.08;
+    }
+    if (opts.nose === 'black' || opts.nose === 'pink') {
+      const z = opts.snout === 'dog' || opts.snout === 'bear' ? 0.105 : 0.088;
+      const ns = add(ball(opts.snout === 'none' ? 0.008 : 0.011, opts.nose === 'black' ? black : pink), 0, 0.1 + (opts.snout !== 'none' ? 0.004 : 0), z); ns.scale.set(1.3, 0.9, 0.8);
+    } else if (opts.nose === 'koala') {
+      const ns = add(ball(0.02, black), 0, 0.098, 0.084); ns.scale.set(0.9, 1.3, 0.7);
+    }
+    if (opts.extra === 'whiskers' || opts.extra === 'mane+whiskers') {
+      const wm = m('#ffffff', 0.4);
+      for (const s of [-1, 1]) for (const k of [-1, 0, 1]) {
+        const wk = add(new THREE.Mesh(new THREE.CylinderGeometry(0.0012, 0.0012, 0.05, 4), wm), 0.04 * s, 0.093 + k * 0.006, 0.085);
+        wk.rotation.z = Math.PI / 2 + k * 0.15 * s;
+      }
+    }
+    this.mouth = add(ball(0.011, black), 0, mouthY, mouthZ); this.mouth.scale.set(1.4, 0.5, 0.5);
 
     // Ears
     this.ears = [];
     for (const s of [-1, 1]) {
+      if (opts.ears === 'none') break;
       const ear = new THREE.Group(); ear.position.set(0.045 * s, 0.155, -0.005); ear.rotation.z = -0.38 * s;
       let outer, inner;
-      if (opts.ears === 'round') {
-        ear.position.y = 0.15;
-        outer = ball(0.026, fur); outer.scale.set(1, 1, 0.45); outer.position.y = 0.02;
-        inner = ball(0.016, pink); inner.scale.set(1, 1, 0.3); inner.position.set(0, 0.02, 0.009);
-      } else if (opts.ears === 'bunny') {
-        ear.rotation.z = -0.15 * s;
-        outer = ball(0.02, fur); outer.scale.set(0.9, 3.2, 0.5); outer.position.y = 0.06;
-        inner = ball(0.012, pink); inner.scale.set(0.8, 3.6, 0.3); inner.position.set(0, 0.058, 0.008);
-      } else {
-        outer = new THREE.Mesh(new THREE.ConeGeometry(0.028, 0.075, 24), fur); outer.position.y = 0.03;
-        inner = new THREE.Mesh(new THREE.ConeGeometry(0.016, 0.05, 24), pink); inner.position.set(0, 0.024, 0.012);
+      switch (opts.ears) {
+        case 'round':
+          ear.position.y = 0.15;
+          outer = ball(0.026, earCol); outer.scale.set(1, 1, 0.45); outer.position.y = 0.02;
+          inner = ball(0.016, pink); inner.scale.set(1, 1, 0.3); inner.position.set(0, 0.02, 0.009); break;
+        case 'koala':
+          ear.position.set(0.07 * s, 0.14, -0.01); ear.rotation.z = -0.9 * s;
+          outer = ball(0.04, earCol); outer.scale.set(1, 1, 0.5); outer.position.y = 0.02;
+          inner = ball(0.026, white); inner.scale.set(1, 1, 0.35); inner.position.set(0, 0.02, 0.012); break;
+        case 'mouse':
+          ear.position.set(0.055 * s, 0.155, -0.01); ear.rotation.z = -0.55 * s;
+          outer = ball(0.038, earCol); outer.scale.set(1, 1, 0.3); outer.position.y = 0.03;
+          inner = ball(0.028, pink); inner.scale.set(1, 1, 0.25); inner.position.set(0, 0.03, 0.007); break;
+        case 'bunny':
+          ear.rotation.z = -0.15 * s;
+          outer = ball(0.02, earCol); outer.scale.set(0.9, 3.2, 0.5); outer.position.y = 0.06;
+          inner = ball(0.012, pink); inner.scale.set(0.8, 3.6, 0.3); inner.position.set(0, 0.058, 0.008); break;
+        case 'floppy':
+          ear.position.set(0.075 * s, 0.14, 0); ear.rotation.z = -2.6 * s;
+          outer = ball(0.024, opts.earColor ? earCol : dark); outer.scale.set(0.8, 2.3, 0.5); outer.position.y = 0.035;
+          inner = new THREE.Object3D(); break;
+        case 'tiny':
+          outer = new THREE.Mesh(new THREE.ConeGeometry(0.016, 0.035, 20), earCol); outer.position.y = 0.012;
+          inner = new THREE.Object3D(); break;
+        case 'tufts':
+          ear.position.set(0.05 * s, 0.16, 0); ear.rotation.z = -0.5 * s;
+          outer = new THREE.Mesh(new THREE.ConeGeometry(0.014, 0.06, 16), dark); outer.position.y = 0.025;
+          inner = new THREE.Object3D(); break;
+        default:
+          outer = new THREE.Mesh(new THREE.ConeGeometry(0.028, 0.075, 24), earCol); outer.position.y = 0.03;
+          inner = new THREE.Mesh(new THREE.ConeGeometry(0.016, 0.05, 24), pink); inner.position.set(0, 0.024, 0.012);
       }
       outer.castShadow = true;
-      ear.add(outer, inner); this.bodyRig.add(ear); this.ears.push(ear);
+      ear.add(outer, inner); R.add(ear); this.ears.push(ear);
     }
+
+    // Extras: mane, horn, horns, wings
+    if (opts.extra === 'mane' || opts.extra === 'mane+whiskers' || opts.extra === 'unicorn') {
+      const maneMat = opts.extra === 'unicorn' ? null : m(opts.maneColor || '#c46a2b', 0.9);
+      const rainbow = ['#ff7eb3', '#ffb347', '#ffd25e', '#7ee08a', '#5ad1e6', '#8f7bff'];
+      const n = opts.extra === 'unicorn' ? 6 : 14;
+      for (let i = 0; i < n; i++) {
+        const a = opts.extra === 'unicorn' ? -0.2 - i * 0.28 : (i / n) * Math.PI * 2;
+        const mm = maneMat || m(rainbow[i % rainbow.length], 0.8);
+        if (opts.extra === 'unicorn') { const tuft = add(ball(0.02, mm), 0, 0.13 + Math.cos(-a) * 0.06, Math.sin(a) * 0.08); tuft.scale.set(0.7, 1, 1); }
+        else { const tuft = add(ball(0.03, mm), Math.cos(a) * 0.075, 0.11 + Math.sin(a) * 0.075, -0.015); tuft.scale.set(1, 1, 0.6); }
+      }
+    }
+    if (opts.extra === 'unicorn' || opts.extra === 'horn') {
+      const hn = add(new THREE.Mesh(new THREE.ConeGeometry(0.013, 0.07, 20), m('#ffd25e', 0.3)), 0, 0.19, 0.04); hn.rotation.x = 0.25;
+    }
+    if (opts.extra === 'horns' || opts.extra === 'dragon') {
+      for (const s of [-1, 1]) { const h = add(new THREE.Mesh(new THREE.ConeGeometry(0.01, 0.04, 12), m('#fff4d6', 0.4)), 0.03 * s, 0.17, -0.005); h.rotation.z = -0.3 * s; h.rotation.x = -0.3; }
+    }
+    this.wings = [];
+    if (opts.extra === 'wings' || opts.extra === 'dragon') {
+      const wm = m(opts.wingColor || (opts.extra === 'dragon' ? '#8f7bff' : '#ffffff'), 0.5);
+      for (const s of [-1, 1]) {
+        const w = new THREE.Group(); w.position.set(0.07 * s, 0.11, -0.04);
+        const blade = new THREE.Mesh(new THREE.SphereGeometry(0.045, 20, 10), wm); blade.scale.set(1.2, 0.6, 0.15); blade.position.x = 0.04 * s; blade.castShadow = true;
+        w.add(blade); w.rotation.y = 0.5 * s; R.add(w); this.wings.push(w); w.side = s;
+      }
+    }
+
+    // Accessories
+    switch (opts.accessory) {
+      case 'bow': { const bm = m('#ff4f8b', 0.4); for (const s of [-1, 1]) { const lobe = add(ball(0.018, bm), 0.03 + 0.016 * s, 0.168, 0.02); lobe.scale.set(1.2, 0.8, 0.5); } add(ball(0.009, bm), 0.03, 0.168, 0.025); break; }
+      case 'partyhat': { const ht = add(new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.07, 24), m('#5ad1e6', 0.5)), 0.01, 0.2, 0); ht.rotation.z = -0.2; add(ball(0.01, m('#ffd25e', 0.4)), 0.018, 0.235, 0); break; }
+      case 'santa': { add(new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.08, 24), m('#e53935', 0.6)), 0, 0.2, -0.005).rotation.z = 0.35; const rim = add(new THREE.Mesh(new THREE.TorusGeometry(0.042, 0.011, 10, 30), white), 0, 0.165, -0.005); rim.rotation.x = Math.PI / 2; add(ball(0.013, white), -0.03, 0.235, -0.005); break; }
+      case 'crown': { const cm = m('#ffd25e', 0.2); const base = add(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.02, 24, 1, true), cm), 0, 0.18, 0); base.material.side = THREE.DoubleSide; for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2; add(new THREE.Mesh(new THREE.ConeGeometry(0.007, 0.02, 8), cm), Math.cos(a) * 0.027, 0.198, Math.sin(a) * 0.027); } break; }
+      case 'scarf': { const sm = m('#e53935', 0.8); const sc = add(new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.014, 10, 40), sm), 0, 0.06, 0.005); sc.rotation.x = Math.PI / 2 - 0.15; const tl = add(ball(0.014, sm), 0.035, 0.035, 0.07); tl.scale.set(0.8, 2, 0.5); break; }
+      case 'glasses': { const gm = m('#1b1430', 0.3); for (const s of [-1, 1]) { const rim = add(new THREE.Mesh(new THREE.TorusGeometry(0.02, 0.003, 8, 24), gm), 0.034 * s, eyeY, 0.088); } add(new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.003, 0.003), gm), 0, eyeY + 0.004, 0.09); break; }
+      case 'flower': { const fm = m('#ffffff', 0.5); for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2; add(ball(0.009, fm), -0.04 + Math.cos(a) * 0.012, 0.165 + Math.sin(a) * 0.012, 0.03); } add(ball(0.007, m('#ffd25e', 0.5)), -0.04, 0.165, 0.035); break; }
+    }
+
     // Tail
     this.tail = new THREE.Group(); this.tail.position.set(0, 0.06, -0.085);
-    const tb = ball(0.026, belly); tb.position.z = -0.012; this.tail.add(tb);
-    this.bodyRig.add(this.tail);
+    switch (opts.tail) {
+      case 'none': break;
+      case 'long': case 'thin': {
+        const thick = opts.tail === 'thin' ? 0.006 : 0.011;
+        const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0.03, -0.04), new THREE.Vector3(0, 0.08, -0.05), new THREE.Vector3(0, 0.11, -0.03)]);
+        const tm = new THREE.Mesh(new THREE.TubeGeometry(curve, 16, thick, 8), opts.tail === 'thin' ? pink : fur); tm.castShadow = true; this.tail.add(tm);
+        if (opts.extra === 'mane' || opts.extra === 'mane+whiskers') { const tuft = ball(0.016, m(opts.maneColor || '#c46a2b', 0.9)); tuft.position.set(0, 0.115, -0.025); this.tail.add(tuft); }
+        break;
+      }
+      case 'fluffy': {
+        const tf = ball(0.035, fur); tf.scale.set(0.8, 0.8, 1.8); tf.position.set(0, 0.03, -0.05); tf.rotation.x = -0.6;
+        const tip = ball(0.022, white); tip.position.set(0, 0.075, -0.1); this.tail.add(tf, tip); break;
+      }
+      case 'curly': {
+        const tc = new THREE.Mesh(new THREE.TorusGeometry(0.018, 0.006, 8, 24, Math.PI * 1.6), pink); tc.position.set(0, 0.015, -0.015); tc.rotation.y = Math.PI / 2; this.tail.add(tc); break;
+      }
+      case 'spiky': {
+        const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, -0.02, -0.05), new THREE.Vector3(0, -0.03, -0.11)]);
+        const tm = new THREE.Mesh(new THREE.TubeGeometry(curve, 12, 0.014, 8), fur); tm.castShadow = true; this.tail.add(tm);
+        const tip = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.03, 4), m(opts.wingColor || '#8f7bff', 0.5)); tip.position.set(0, -0.03, -0.12); tip.rotation.x = -Math.PI / 2; this.tail.add(tip);
+        break;
+      }
+      default: { const tb = ball(0.026, belly); tb.position.z = -0.012; this.tail.add(tb); }
+    }
+    R.add(this.tail);
+
     // Feet
     this.feet = [];
+    const footMat = opts.feetColor ? m(opts.feetColor, 0.5) : dark;
     for (const [x, z] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
-      const f = ball(0.021, dark); f.scale.set(1, 0.7, 1.2); f.position.set(0.045 * x, 0.014, 0.038 * z);
+      const f = ball(0.021, footMat); f.scale.set(1, 0.7, 1.2); f.position.set(0.045 * x, 0.014, 0.038 * z);
       f.base = f.position.clone(); this.add(f); this.feet.push(f);
     }
     // Mouth slot for carrying things
-    this.mouthSlot = new THREE.Object3D(); this.mouthSlot.position.set(0, 0.085, 0.11); this.bodyRig.add(this.mouthSlot);
+    this.mouthSlot = new THREE.Object3D(); this.mouthSlot.position.set(0, 0.085, 0.11); R.add(this.mouthSlot);
 
     this.state = 'idle';
     this.target = null;
@@ -83,6 +218,28 @@ export class Pet extends THREE.Group {
     this.onHearts = null;
     this.onArrive = null;
   }
+
+  // Ready-made animals (you can still change every part afterwards).
+  static ANIMALS = {
+    puppy:   { emoji: '🐶', color: '#e0a96d', belly: '#fff1dc', ears: 'floppy', earColor: '#8a5a33', snout: 'dog', nose: 'black', tail: 'long', pattern: 'none', extra: 'none' },
+    kitten:  { emoji: '🐱', color: '#b9b4c7', belly: '#ffffff', ears: 'pointy', snout: 'none', nose: 'pink', tail: 'long', pattern: 'stripes', extra: 'whiskers' },
+    bunny:   { emoji: '🐰', color: '#f4f1f8', belly: '#ffffff', ears: 'bunny', snout: 'none', nose: 'pink', tail: 'puff', pattern: 'none', extra: 'whiskers' },
+    koala:   { emoji: '🐨', color: '#9aa3ad', belly: '#e9edf1', ears: 'koala', snout: 'none', nose: 'koala', tail: 'none', pattern: 'none', extra: 'none' },
+    bear:    { emoji: '🐻', color: '#8a5a33', belly: '#d9b48a', ears: 'round', snout: 'bear', nose: 'black', tail: 'puff', pattern: 'none', extra: 'none' },
+    panda:   { emoji: '🐼', color: '#ffffff', belly: '#ffffff', ears: 'round', earColor: '#1b1430', feetColor: '#1b1430', snout: 'none', nose: 'black', tail: 'puff', pattern: 'panda', extra: 'none' },
+    fox:     { emoji: '🦊', color: '#ff8a3d', belly: '#ffffff', ears: 'pointy', snout: 'dog', nose: 'black', tail: 'fluffy', pattern: 'mask', extra: 'none', feetColor: '#3a2a2a' },
+    mouse:   { emoji: '🐭', color: '#c9c3d6', belly: '#f4f1f8', ears: 'mouse', snout: 'none', nose: 'pink', tail: 'thin', pattern: 'none', extra: 'whiskers' },
+    piggy:   { emoji: '🐷', color: '#ffb3c7', belly: '#ffd1e0', ears: 'tiny', snout: 'pig', nose: 'none', tail: 'curly', pattern: 'none', extra: 'none' },
+    frog:    { emoji: '🐸', color: '#7ee08a', belly: '#e8ffd9', ears: 'none', snout: 'none', nose: 'none', tail: 'none', pattern: 'spots', extra: 'frogeyes' },
+    lion:    { emoji: '🦁', color: '#ffcc66', belly: '#fff1c9', ears: 'round', snout: 'bear', nose: 'black', tail: 'long', pattern: 'none', extra: 'mane+whiskers', maneColor: '#c46a2b' },
+    unicorn: { emoji: '🦄', color: '#ffffff', belly: '#fff0fb', ears: 'pointy', snout: 'none', nose: 'pink', tail: 'puff', pattern: 'none', extra: 'unicorn' },
+    dragon:  { emoji: '🐲', color: '#5ac88a', belly: '#e8ffd9', ears: 'tiny', snout: 'bear', nose: 'none', tail: 'spiky', pattern: 'none', extra: 'dragon', wingColor: '#8f7bff' },
+    penguin: { emoji: '🐧', color: '#2a2a3a', belly: '#ffffff', ears: 'none', snout: 'beak', nose: 'none', tail: 'none', pattern: 'none', extra: 'none', feetColor: '#ffb347' },
+    monkey:  { emoji: '🐵', color: '#8a5a33', belly: '#f2d3b0', ears: 'round', earColor: '#f2d3b0', snout: 'bear', nose: 'none', tail: 'long', pattern: 'mask', extra: 'none' },
+    owl:     { emoji: '🦉', color: '#9b6b43', belly: '#f2d3b0', ears: 'tufts', snout: 'beak', nose: 'none', tail: 'none', pattern: 'none', extra: 'wings', wingColor: '#7a4f30' },
+    dino:    { emoji: '🦖', color: '#8f7bff', belly: '#d9d2ff', ears: 'none', snout: 'bear', nose: 'none', tail: 'spiky', pattern: 'spots', extra: 'horns', wingColor: '#ff7eb3' },
+    blob:    { emoji: '🫧', color: '#ff9f6e', belly: '#ffe2c4', ears: 'pointy', snout: 'none', nose: 'pink', tail: 'puff', pattern: 'none', extra: 'none' },
+  };
 
   // Mood visuals: a little green when sick, droopy and slow when tired.
   setCondition({ sick, tired }) {
@@ -279,8 +436,10 @@ export class Pet extends THREE.Group {
     this.bodyRig.position.y = lift;
     this.bodyRig.scale.set(sx, sy, sx);
 
-    // Ears, tail, mouth
+    // Ears, wings, tail, mouth
     this.ears.forEach((e, i) => { e.rotation.x = Math.sin(t * 3 + i) * 0.08 - (walking ? 0.2 : 0); });
+    const flap = this.state === 'happy' || this.state === 'leap' || (this.state === 'trick' && this.trick === 'jumphigh') ? 22 : walking ? 10 : 2.5;
+    for (const w of this.wings) w.rotation.z = w.side * (0.15 + Math.sin(t * flap) * (flap > 5 ? 0.45 : 0.12));
     const wag = this.state === 'happy' || (this.state === 'trick' && ['bow', 'beg', 'dance', 'speak'].includes(this.trick));
     this.tail.rotation.y = Math.sin(t * (wag ? 22 : 6)) * 0.6;
     const mouthOpen = this.state === 'happy' || this.state === 'eat' || this.mouthOpen ? 1.4 : 0.5;
