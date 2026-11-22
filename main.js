@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Pet, Ball, makeTreat, makeBowl, Hearts } from './pet.js';
+import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'pip-pet-v1';
@@ -102,7 +102,7 @@ let hideGame = null;               // { since }
 let nextMischief = 45;
 const skills = { come: 0.55, sit: 0.25, spin: 0.15, hop: 0.3, fetch: 0.45, hide: 0.2, sleep: 0.3, down: 0.3, stay: 0.3, jumphigh: 0.2,
   paw: 0.3, highfive: 0.2, wave: 0.15, speak: 0.4, rollover: 0.1, playdead: 0.1, beg: 0.2, bow: 0.15, dance: 0.25, sing: 0.2,
-  chasetail: 0.35, backflip: 0.05, shy: 0.2, kiss: 0.6, sniff: 0.5, shakeoff: 0.4, up: 0.35, follow: 0.6, ...(saved?.skills || {}) };
+  chasetail: 0.35, backflip: 0.05, shy: 0.2, kiss: 0.6, sniff: 0.5, shakeoff: 0.4, up: 0.35, follow: 0.6, cleanup: 0.35, ...(saved?.skills || {}) };
 let lastSuccess = null;
 
 /* ---------------- needs: food, water, energy, happiness, tummy ---------------- */
@@ -135,7 +135,7 @@ function updateNeeds(dt) {
   if (!sick && needs.tummy >= 4) {
     sick = true; pet.state = 'idle'; pet.target = null;
     emote('ugh…', '#b7d98a'); sfx.confused();
-    toast(`${look.name} ate too many cookies and has a tummy ache 🤢`);
+    toast(`${look.name} had too many treats and has a tummy ache 🤢`);
   }
   if (sick && sleeping && needs.thirst > 60 && performance.now() - napStart > 12000) {
     sick = false; needs.tummy = 0;
@@ -155,7 +155,7 @@ function updateNeeds(dt) {
     needTalk = 9 + Math.random() * 6;
     if (sick) emote(needs.thirst < 60 ? 'water…' : 'tummy hurts', '#b7d98a');
     else if (needs.thirst < 25) emote('thirsty…', '#5ad1e6');
-    else if (needs.hunger < 25) emote('hungry…', '#ffd25e');
+    else if (needs.hunger < 25) emote('hungry… dinner?', '#ffd25e');
     else if (needs.energy < 25) emote('*yawn*');
     else if (needs.fun < 25) emote('play?', '#ff7eb3');
   }
@@ -614,35 +614,94 @@ function holdItem(kind) {
 }
 $('ballBtn').onclick = () => holdItem('ball');
 $('treatBtn').onclick = () => holdItem('treat');
-$('waterBtn').onclick = () => placeWater();
+$('waterBtn').onclick = () => placeBowls('both');
 
-function placeWater() {
+let foodBowl = null;
+function placeWater() { placeBowls('water'); }
+function placeBowls(which = 'both') {
   if (!pet?.parent) return;
-  if (!bowl) { bowl = makeBowl(); }
-  scene.add(bowl);
-  bowl.position.copy(frontOfYou(0.4)); bowl.position.y = floorY;
-  bowl.scale.setScalar(0.01); bowl.pop = 0;
+  const front = frontOfYou(0.45);
+  const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
+  const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
+  const side = new THREE.Vector3(-fwd.z, 0, fwd.x);
+  const put = (obj, offset) => { scene.add(obj); obj.position.copy(front).addScaledVector(side, offset); obj.position.y = floorY; obj.scale.setScalar(0.01); obj.pop = 0; popping.add(obj); };
+  if (which !== 'water') { if (!foodBowl) foodBowl = makeFoodBowl(); foodBowl.food.visible = true; foodBowl.food.scale.setScalar(1); put(foodBowl, which === 'both' ? -0.09 : 0); }
+  if (which !== 'food') { if (!bowl) bowl = makeBowl(); bowl.water.scale.setScalar(1); put(bowl, which === 'both' ? 0.09 : 0); }
   sfx.chirp(0.8);
   if (pet.state === 'sleep') { emote('z z z'); return; }
-  setTimeout(() => {
-    if (!bowl.parent || pet.state === 'sleep' || hideGame) return;
-    travel(bowl.position, needs.thirst < 40, () => {
-      pet.state = 'eat'; emote('slurp');
-      for (let i = 0; i < 5; i++) tone(500, 380, 0.07, 'sine', 0.12, i * 0.22);
-      const t0 = performance.now();
-      const drink = () => {
-        const p = (performance.now() - t0) / 1600;
-        bowl.water.scale.setScalar(Math.max(0.2, 1 - p * 0.8));
-        if (p < 1) return requestAnimationFrame(drink);
-        needs.thirst = 100; pet.state = 'idle';
-        bowl.water.scale.setScalar(1);
-        if (sick) { emote('need a nap…', '#b7d98a'); setTimeout(() => { if (sick && pet.state !== 'sleep') goNap(); }, 1500); }
-        else { pet.happy(1); emote('Ahh!', '#5ad1e6'); }
-      };
-      drink();
-    });
-  }, 500);
+  setTimeout(() => goEatOrDrink(which), 500);
 }
+function goEatOrDrink(which) {
+  if (pet.state === 'sleep' || hideGame) return;
+  const wantFood = which !== 'water' && foodBowl?.parent && foodBowl.food.visible && (which === 'food' || needs.hunger <= needs.thirst);
+  if (wantFood) {
+    travel(foodBowl.position.clone().setY(floorY), needs.hunger < 40, () => {
+      pet.state = 'eat'; emote('nom nom'); sfx.munch(); setTimeout(() => sfx.munch(), 700);
+      const t0 = performance.now();
+      const chew = () => {
+        const p = (performance.now() - t0) / 2000;
+        foodBowl.food.scale.setScalar(Math.max(0.15, 1 - p * 0.85));
+        if (p < 1) return requestAnimationFrame(chew);
+        foodBowl.food.visible = false;
+        needs.hunger = 100; needs.tummy = Math.max(0, needs.tummy - 1); needs.fun = clamp01(needs.fun + 5);
+        pet.state = 'idle'; pet.happy(1); emote('Yum, veggies! 🥕', '#7ee08a');
+        if (which === 'both' && needs.thirst < 90 && bowl?.parent) setTimeout(() => goEatOrDrink('water'), 900);
+      };
+      chew();
+    });
+    return;
+  }
+  if (!bowl?.parent) return;
+  travel(bowl.position.clone().setY(floorY), needs.thirst < 40, () => {
+    pet.state = 'eat'; emote('slurp');
+    for (let i = 0; i < 5; i++) tone(500, 380, 0.07, 'sine', 0.12, i * 0.22);
+    const t0 = performance.now();
+    const drink = () => {
+      const p = (performance.now() - t0) / 1600;
+      bowl.water.scale.setScalar(Math.max(0.2, 1 - p * 0.8));
+      if (p < 1) return requestAnimationFrame(drink);
+      needs.thirst = 100; pet.state = 'idle';
+      bowl.water.scale.setScalar(1);
+      if (sick) { emote('need a nap…', '#b7d98a'); setTimeout(() => { if (sick && pet.state !== 'sleep') goToBedAndNap(); }, 1500); }
+      else { pet.happy(1); emote('Ahh!', '#5ad1e6'); }
+      if (which === 'both' && foodBowl?.parent && foodBowl.food.visible && needs.hunger < 90) setTimeout(() => goEatOrDrink('food'), 900);
+    };
+    drink();
+  });
+}
+const popping = new Set();
+function updatePops(dt) {
+  for (const o of popping) { o.pop = Math.min(1, o.pop + dt * 4); o.scale.setScalar(Math.max(0.01, o.pop)); if (o.pop >= 1) popping.delete(o); }
+}
+
+/* ---------------- clean up your toys ---------------- */
+let toyBox = null, cleaning = false;
+function cleanUp() {
+  const toys = thrown.filter((o) => o.kind === 'ball' && !o.held && !o.boxed);
+  if (!toys.length) { emote('all clean!'); return; }
+  if (!toyBox) toyBox = makeToyBox();
+  if (!toyBox.parent) {
+    scene.add(toyBox);
+    const at = bed?.parent ? bed.position.clone().add(new THREE.Vector3(0.28, 0, 0)) : frontOfYou(0.6).add(new THREE.Vector3(0.3, 0, 0));
+    toyBox.position.set(at.x, floorY, at.z); toyBox.scale.setScalar(0.01); toyBox.pop = 0; popping.add(toyBox);
+  }
+  cleaning = true; emote('on it!');
+  const next = () => {
+    const t = thrown.find((o) => o.kind === 'ball' && !o.held && !o.boxed);
+    if (!t || !cleaning) { cleaning = false; pet.happy(2); emote('all clean! ✨', '#7ee08a'); success('cleanup'); return; }
+    travel(t.position.clone().setY(floorY), true, () => {
+      t.held = true; scene.remove(t); pet.mouthSlot.add(t); t.position.set(0, 0, 0); sfx.squeak();
+      travel(toyBox.position.clone().setY(floorY).add(new THREE.Vector3(0, 0, -0.12)), true, () => {
+        pet.mouthSlot.remove(t); toyBox.add(t);
+        t.position.set(-0.04 + (toyBox.slots % 3) * 0.04, 0.03 + Math.floor(toyBox.slots / 3) * 0.03, -0.02 + (toyBox.slots % 2) * 0.04);
+        toyBox.slots++; t.held = false; t.boxed = true; t.vel = new THREE.Vector3(); removeFromThrownOnly(t);
+        sfx.bounce(0.5); pet.hop(); setTimeout(next, 500);
+      });
+    });
+  };
+  next();
+}
+function removeFromThrownOnly(o) { const i = thrown.indexOf(o); if (i >= 0) thrown.splice(i, 1); }
 
 // Swipe to throw (anywhere on screen)
 let swipe = null;
@@ -721,7 +780,7 @@ function stepThrown(dt) {
 function onLanded(o) {
   if (!pet || hideGame || pet.state === 'sleep') return;
   if (o.kind === 'treat') {
-    if (sick) { emote('no more cookies…', '#b7d98a'); return; }
+    if (sick) { emote('no more treats…', '#b7d98a'); return; }
     travel(o.position, true, () => eatTreat(o));
   } else {
     // Always chases. Whether it brings it back depends on training (and mood).
@@ -791,7 +850,8 @@ const TRICK_NAMES = {
   dance: ['Dance', 'dance'], sing: ['Sing', 'sing'], chasetail: ['Chase tail', 'chase your tail'], backflip: ['Backflip', 'backflip'],
   shy: ['Peekaboo', 'peekaboo'], kiss: ['Kisses', 'kiss / I love you'], sniff: ['Sniff', 'find it / sniff'], shakeoff: ['Shake off', 'shake it off'],
   hide: ['Hide & seek', 'hide and seek'], sleep: ['Nap', 'take a nap · "wake up" at the bed'], up: ['Jump on table', 'jump up / get down'],
-  follow: ['Walk together', 'follow me / heel'],
+  follow: ['Walk together', "let's go for a walk / follow me"],
+  cleanup: ['Clean up', 'clean up your toys'],
 };
 function obey(cmd, quiet = false) {
   const s = skills[cmd] ?? 0.3;
@@ -1035,7 +1095,9 @@ const COMMANDS = [
   [/\b(spin|twirl|turn around)\b/, 'spin'],
   [/\b(jump|hop)\b/, 'hop'],
   [/\b(fetch|ball|throw)\b/, 'fetch'],
-  [/\b(treat|cookie|hungry|eat|snack)\b/, 'treat'],
+  [/\b(clean up|clean|tidy|put (your )?toys away|toys)\b/, 'cleanup'],
+  [/\b(food|dinner|breakfast|lunch|supper|hungry|eat|meal|veggies|vegetables)\b/, 'food'],
+  [/\b(treat|bone|snack|chew|cookie)\b/, 'treat'],
   [/\b(water|drink|thirsty)\b/, 'water'],
   [/\b(hide|seek|hiding)\b/, 'hide'],
   [/\b(wake|wake up|rise and shine)\b/, 'wake'],
@@ -1071,8 +1133,10 @@ function onSpeech(text) {
       if (!obey('fetch')) return;
       emote('!'); chase(b, true); return;
     }
-    case 'treat': if (sick) { emote('no more cookies…', '#b7d98a'); return; } (voiceOnly || follow) ? autoThrow('treat') : holdItem('treat'); emote('!!'); return;
-    case 'water': placeWater(); return;
+    case 'treat': if (sick) { emote('no more treats…', '#b7d98a'); return; } (voiceOnly || follow) ? autoThrow('treat') : holdItem('treat'); emote('!!'); return;
+    case 'water': placeBowls('water'); return;
+    case 'food': placeBowls('food'); return;
+    case 'cleanup': if (!obey('cleanup')) return; cleanUp(); return;
     case 'follow': setWalk(true); return;
     case 'sleep': if (pet.state !== 'sleep') goToBedAndNap(); return;
     default: if (cmd === 'come') { zoomUntil = 0; stayMode = false; } doTrick(cmd);
@@ -1253,6 +1317,7 @@ renderer.setAnimationLoop((time, frame) => {
       maybeCuddle(dt);
       if (pet.state !== 'leap') shadowCatcher.position.y = pet.position.y + 0.001;
     }
+    updatePops(dt);
     if (bed && bed.pop !== undefined && bed.pop < 1) { bed.pop = Math.min(1, bed.pop + dt * 4); bed.scale.setScalar(Math.max(0.01, bed.pop)); }
     if (bowl && bowl.pop !== undefined && bowl.pop < 1) { bowl.pop = Math.min(1, bowl.pop + dt * 4); bowl.scale.setScalar(Math.max(0.01, bowl.pop)); }
     // Self-started mischief every so often.

@@ -503,7 +503,56 @@ export function makeBowl() {
   return g;
 }
 
+// Healthy dinner: a bowl of veggies.
+export function makeFoodBowl() {
+  const g = new THREE.Group();
+  const bm = new THREE.MeshStandardMaterial({ color: '#ff8a3d', roughness: 0.5, side: THREE.DoubleSide });
+  const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.045, 0.032, 40, 1, true), bm); bowl.position.y = 0.016; bowl.castShadow = true;
+  const base = new THREE.Mesh(new THREE.CircleGeometry(0.045, 40), bm); base.rotation.x = -Math.PI / 2; base.position.y = 0.001;
+  g.add(bowl, base);
+  const food = new THREE.Group(); food.position.y = 0.026; g.add(food); g.food = food;
+  const carrot = new THREE.MeshStandardMaterial({ color: '#ff7a1a', roughness: 0.6 });
+  const pea = new THREE.MeshStandardMaterial({ color: '#5ac84a', roughness: 0.5 });
+  const broc = new THREE.MeshStandardMaterial({ color: '#2f9e44', roughness: 0.9 });
+  for (let i = 0; i < 5; i++) {
+    const c = new THREE.Mesh(new THREE.ConeGeometry(0.006, 0.03, 10), carrot);
+    const a = i * 1.3; c.position.set(Math.cos(a) * 0.03, 0.006, Math.sin(a) * 0.03); c.rotation.z = Math.PI / 2; c.rotation.y = a; food.add(c);
+  }
+  for (let i = 0; i < 10; i++) { const p = new THREE.Mesh(new THREE.SphereGeometry(0.0055, 10, 6), pea); const a = i * 2.4, r = 0.008 + (i % 4) * 0.009; p.position.set(Math.cos(a) * r, 0.006, Math.sin(a) * r); food.add(p); }
+  for (let i = 0; i < 3; i++) {
+    const b = new THREE.Group(); const a = i * 2.1 + 0.4; b.position.set(Math.cos(a) * 0.022, 0.008, Math.sin(a) * 0.022);
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.004, 0.014, 8), new THREE.MeshStandardMaterial({ color: '#9fd16b' })); b.add(stem);
+    for (let k = 0; k < 4; k++) { const f = new THREE.Mesh(new THREE.SphereGeometry(0.0065, 8, 6), broc); f.position.set(Math.cos(k * 1.6) * 0.005, 0.01, Math.sin(k * 1.6) * 0.005); b.add(f); }
+    food.add(b);
+  }
+  return g;
+}
+
+// A fun little treat: a bone-shaped chew.
 export function makeTreat() {
+  const g = new THREE.Group();
+  const m = new THREE.MeshStandardMaterial({ color: '#fff1c9', roughness: 0.55, emissive: '#ffb347', emissiveIntensity: 0.12 });
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.036, 12), m); shaft.rotation.z = Math.PI / 2; shaft.castShadow = true; g.add(shaft);
+  for (const x of [-1, 1]) for (const z of [-1, 1]) { const k = new THREE.Mesh(new THREE.SphereGeometry(0.0075, 12, 8), m); k.position.set(x * 0.019, 0, z * 0.006); k.castShadow = true; g.add(k); }
+  g.position.y = 0.008;
+  return g;
+}
+
+// Toy box for "clean up your toys".
+export function makeToyBox() {
+  const g = new THREE.Group();
+  const wm = new THREE.MeshStandardMaterial({ color: '#5ad1e6', roughness: 0.7, side: THREE.DoubleSide });
+  const w = 0.16, h = 0.07;
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(w, 0.006, w), wm); floor.position.y = 0.003; g.add(floor);
+  for (const [x, z, ry] of [[0, w / 2, 0], [0, -w / 2, 0], [w / 2, 0, Math.PI / 2], [-w / 2, 0, Math.PI / 2]]) {
+    const side = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.006), wm); side.position.set(x, h / 2, z); side.rotation.y = ry; side.castShadow = true; g.add(side);
+  }
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(w + 0.004, 0.012, w + 0.004), new THREE.MeshStandardMaterial({ color: '#ffd25e' })); stripe.position.y = h - 0.01; g.add(stripe);
+  g.slots = 0;
+  return g;
+}
+
+export function makeCookieTreatLegacy() {
   const g = new THREE.Group();
   const cookie = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.012, 32), new THREE.MeshStandardMaterial({ color: '#d99a52', roughness: 0.9 }));
   cookie.castShadow = true; cookie.position.y = 0.006; g.add(cookie);
