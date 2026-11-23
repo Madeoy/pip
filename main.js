@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=12';
-import { HandSeer } from './hand.js?v=12';
+import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=13';
+import { HandSeer } from './hand.js?v=13';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'pip-pet-v1';
@@ -815,13 +815,14 @@ function updateHandBalls(dt) {
 let petInHand = false, handOffset = null, petHandLostAt = 0;
 function petHandPoint() {
   const pt = hand.palm, W = innerWidth, H = innerHeight;
+  if (!pt || !Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return pet.position.clone();
   const ndc = new THREE.Vector3((pt.x / W) * 2 - 1, -((pt.y + 20) / H) * 2 + 1, 0.5);
   const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
   const dir = ndc.unproject(camera).sub(cp).normalize();
   return cp.addScaledVector(dir, 0.42);
 }
 function hopIn() {
-  if (petInHand) { emote('already here ♥'); return; }
+  if (petInHand) { hopOut(); return; }
   if (mode !== 'cam') { toast('Hop-in works in camera mode — tap "Bring it into my room"'); return; }
   startHandSeer();
   if (!hand?.visible) { toast(`Hold your hand out in front of the camera, palm up, then say "hop in"`); emote('?'); return; }
@@ -839,10 +840,17 @@ function hopIn() {
 }
 function hopOut() {
   $('hopOutBtn').hidden = true;
-  if (!petInHand) { stayMode = false; pocketSize(false); if (pet.state === 'sit') pet.state = 'idle'; return; }
-  petInHand = false; stayMode = false; pocketSize(false); $('hopOutBtn').hidden = true; petHandLostAt = 0;
-  const spot = frontOfYou(0.5); spot.y = floorY;
-  pet.leapTo(spot, () => { pet.hop(); emote('wheee!', '#ffd25e'); sfx.happy(); });
+  const wasIn = petInHand;
+  petInHand = false; stayMode = false; pocketSize(false); petHandLostAt = 0;
+  pet.target = null; pet.onArrive = null;
+  if (!wasIn) { if (['sit', 'leap'].includes(pet.state)) pet.state = 'idle'; return; }
+  // Land on the floor just in front of you, where you can see it.
+  let spot = frontOfYou(0.6);
+  if (!Number.isFinite(pet.position.x)) pet.position.copy(spot).setY(floorY + 0.3);
+  spot.y = floorY;
+  pet.leapTo(spot, () => { pet.state = 'idle'; pet.hop(); emote('wheee!', '#ffd25e'); sfx.happy(); });
+  // Safety net: whatever happens, it's back to normal a moment later.
+  setTimeout(() => { if (!petInHand && pet.state === 'leap') { pet.state = 'idle'; pet.position.copy(spot); } }, 2500);
 }
 // Shrink a little while in your palm so it fits.
 let pocketScale = 1;
@@ -1290,7 +1298,7 @@ function petOnScreen() {
 function recall() {
   if (!pet) return;
   if (mode === 'ar' && !placed) { toast('Tap the floor to place your pet first'); return; }
-  if (petInHand) { emote("I'm right here! ♥", '#ff7eb3'); sfx.joy(); return; }
+  if (petInHand) { hopOut(); setTimeout(recall, 900); return; }
   // Drop whatever it was doing.
   if (hideGame) { hideGame = null; stopHideBuzz(); $('arrow').hidden = true; }
   stayMode = false; zoomUntil = 0; cleaning = false; wantsPat = 0;
@@ -1362,8 +1370,15 @@ function startListening() {
   audio().resume?.();
   rec = new SR(); rec.lang = 'en-US'; rec.continuous = true; rec.interimResults = false;
   rec.onresult = (e) => { const r = e.results[e.results.length - 1]; if (r.isFinal) onSpeech(r[0].transcript.trim()); };
-  rec.onend = () => { if (listening) { try { rec.start(); } catch {} } };
-  rec.onerror = (e) => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { stopListening(); toast('Microphone permission is needed to talk'); } };
+  rec.onend = () => {
+    if (!listening) return;
+    setTimeout(() => {
+      if (!listening) return;
+      try { rec.start(); }
+      catch { listening = false; $('micBtn').classList.remove('on'); $('voiceHeard').textContent = 'Mic paused — tap here'; toast('Mic paused — tap 🎤 to keep talking'); }
+    }, 250);
+  };
+  rec.onerror = (e) => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { stopListening(); toast('Microphone permission is needed to talk'); } /* no-speech / network: onend restarts it */ };
   try { rec.start(); listening = true; $('micBtn').classList.add('on'); $('heard').innerHTML = `Listening… try <b>"${escapeHtml(look.name)}, sit!"</b>`; emote('?'); }
   catch (e) { toast('Could not start the microphone'); }
 }
@@ -1558,7 +1573,8 @@ function restorePets(file) {
 
 /* ---------------- main loop ---------------- */
 const clock = new THREE.Clock();
-renderer.setAnimationLoop((time, frame) => {
+renderer.setAnimationLoop((time, frame) => { try { tick(time, frame); } catch (e) { console.error(e); healPet(); try { renderer.render(scene, camera); } catch {} } });
+function tick(time, frame) {
   const dt = Math.min(0.05, clock.getDelta());
   if (mode === 'ar' && frame && hitSource) {
     const ref = renderer.xr.getReferenceSpace();
@@ -1623,7 +1639,15 @@ renderer.setAnimationLoop((time, frame) => {
   hearts.update(dt); updateEmotes(dt);
   updateArrow();
   renderer.render(scene, camera);
-});
+  if (pet && (!Number.isFinite(pet.position.x) || !Number.isFinite(pet.position.y) || !Number.isFinite(pet.position.z))) healPet();
+}
+function healPet() {
+  if (!pet) return;
+  petInHand = false; pocketScale = 1; stayMode = false; $('hopOutBtn').hidden = true;
+  pet.target = null; pet.onArrive = null; pet.state = 'idle'; pet.setVisibility(1);
+  const spot = frontOfYou(0.8); spot.y = floorY; pet.position.copy(spot);
+  if (!Number.isFinite(pet.scale.x) || pet.scale.x < 0.3) pet.scale.setScalar(1);
+}
 
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); if (mode === 'create') frameCamera('create'); });
 

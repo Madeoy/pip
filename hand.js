@@ -43,8 +43,8 @@ export class HandSeer {
           const ids = [0, 5, 9, 13, 17];
           let nx = 0, ny = 0; for (const i of ids) { nx += pts[i].x; ny += pts[i].y; }
           nx /= ids.length; ny /= ids.length;
-          this.palm = this.toScreen(nx, ny);
-          this.lastSeen = performance.now();
+          const pt = this.toScreen(nx, ny);
+          if (Number.isFinite(pt.x) && Number.isFinite(pt.y)) { this.palm = pt; this.lastSeen = performance.now(); }
         }
       } catch {}
       this.busy = false;
@@ -55,6 +55,7 @@ export class HandSeer {
   // The video is shown with object-fit: cover, so map through the crop.
   toScreen(nx, ny) {
     const v = this.video, W = innerWidth, H = innerHeight;
+    if (!v.videoWidth || !v.videoHeight) return { x: NaN, y: NaN };
     const s = Math.max(W / v.videoWidth, H / v.videoHeight);
     const dw = v.videoWidth * s, dh = v.videoHeight * s;
     return { x: (W - dw) / 2 + nx * dw, y: (H - dh) / 2 + ny * dh };
