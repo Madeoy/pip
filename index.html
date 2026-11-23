@@ -151,6 +151,8 @@
     #photoUI.selfie .zoom-btns, #photoUI.selfie .photo-hint { visibility: hidden; }
     #hud.photo .dock, #hud.photo .heard, #hud.photo #status, #hud.photo #tut, #hud.photo #arrow { display: none !important; }
     #hud.photo #toast { bottom: calc(200px + var(--safe-b)) !important; top: auto !important; }
+    #peek { position: absolute; inset: 0; z-index: 7; display: flex; align-items: center; justify-content: center; background: rgba(42,26,94,.94); }
+    #peekText { font-size: 44px; font-weight: 800; text-align: center; padding: 0 24px; line-height: 1.2; }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -207,6 +209,7 @@
       </div>
       <button class="pill" id="hopOutBtn" hidden style="position:absolute;left:50%;transform:translateX(-50%);top:calc(96px + var(--safe-t));font-size:18px;font-weight:800;padding:10px 20px;background:#ffd25e;color:#3a2400;z-index:5">🤲 Hop out</button>
       <div id="arrow" hidden><i></i></div>
+      <div id="peek" hidden><div id="peekText">🙈</div></div>
       <div id="tut" hidden>
         <div style="text-align:center;font-size:12px;font-weight:800;letter-spacing:.08em;color:#7c5cff;margin-bottom:4px">🎓 TRAINING AREA</div>
         <div class="tut-dots" id="tutDots"></div>
@@ -290,6 +293,6 @@
     setTimeout(show, 12000);
   })();
   </script>
-  <script type="module" src="main.js?v=24"></script>
+  <script type="module" src="main.js?v=25"></script>
 </body>
 </html>

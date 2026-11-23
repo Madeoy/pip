@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=24';
-import { HandSeer } from './hand.js?v=24';
-import { WalkMap } from './walk.js?v=24';
+import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=25';
+import { HandSeer } from './hand.js?v=25';
+import { WalkMap } from './walk.js?v=25';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'pip-pet-v1';
@@ -285,7 +285,7 @@ function refreshPet() {
 }
 
 /* ---------------- emote bubbles ---------------- */
-function emote(text, color = '#ffffff') {
+function emote(text, color = '#ffffff', at = null) {
   if (!pet) return;
   for (const old of [...emotes.children]) old.life = Math.max(old.life, 1.3);   // fade the previous bubble
   const c = document.createElement('canvas'); c.width = 256; c.height = 128;
@@ -297,7 +297,7 @@ function emote(text, color = '#ffffff') {
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
   s.renderOrder = 10;
   s.scale.set(0.14, 0.07, 1);
-  s.position.copy(pet.localToWorld(new THREE.Vector3(0, 0.26, 0)));
+  s.position.copy(at || pet.localToWorld(new THREE.Vector3(0, 0.26, 0)));
   s.life = 0; emotes.add(s);
 }
 function updateEmotes(dt) {
@@ -328,6 +328,7 @@ const TUT = [
   { id: 'ball',  icon: '🎾', btn: 'ballBtn', text: () => `Tap 🎾 Ball. Then swipe up to throw it.`, held: () => `Now swipe up on the screen to throw!` },
   { id: 'food',  icon: '🥕', btn: 'waterBtn', text: () => `${look.name} is hungry. Tap 🍽️ Food, then tap the floor to put the bowls down.`, held: () => `Now tap each bowl to fill it with food and water! 🥕💧` },
   { id: 'trick', icon: '🎤', btn: 'micBtn', text: () => `Teach a trick! Tap 🎤 and say “${look.name}, sit!”`, skip: 'Use a button instead' },
+  { id: 'hide',  icon: '🙈', btn: 'hideBtn', text: () => `Hide and seek! Tap 🙈 Hide.`, held: () => `Tap the box, drum or bush where ${look.name} is hiding!` },
   { id: 'bed',   icon: '🛏️', btn: 'bedBtn', text: () => `Time for bed. Tap 🛏️ Bed.`, held: () => `Now tap a spot on the floor for the bed.` },
   { id: 'done',  icon: '🎉', text: () => `You did it! ${look.name} loves you.` },
 ];
@@ -805,6 +806,7 @@ function handleTap(ray) {
     }
     if (best) { fillBowl(best); return; }
   }
+  if (hideGame?.play) { if (hideGame.ready && ray.intersectObject(pet, true).length) return foundPet(); guessHide(ray); return; }
   if (ray.intersectObject(pet, true).length) {
     if (hideGame) return foundPet();
     if (pet.state === 'sleep') { pet.hop(); emote('!'); return; }
@@ -1568,7 +1570,83 @@ function clampToPlay(p) {
 }
 
 /* ---------------- hide and seek ---------------- */
+/* ---------------- Training area: Find Pip (tap where it's hiding) ---------------- */
+let hideProps = null;
+function makeHideProps() {
+  const mat = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.75 });
+  const box = new THREE.Group();
+  { const b = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.36, 0.26), mat('#ffb347')); b.position.y = 0.18; box.add(b);
+    const r1 = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.365, 0.265), mat('#ff5d8f')); r1.position.y = 0.18; box.add(r1);
+    const r2 = new THREE.Mesh(new THREE.BoxGeometry(0.305, 0.365, 0.05), mat('#ff5d8f')); r2.position.y = 0.18; box.add(r2); }
+  const drum = new THREE.Group();
+  { const d = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.16, 0.36, 36), mat('#7c5cff')); d.position.y = 0.18; drum.add(d);
+    for (const y of [0.03, 0.33]) { const band = new THREE.Mesh(new THREE.TorusGeometry(0.155, 0.014, 10, 36), mat('#ffd25e')); band.rotation.x = Math.PI / 2; band.position.y = y; drum.add(band); } }
+  const bush = new THREE.Group();
+  for (const [x, y, r] of [[-0.06, 0.13, 0.12], [0.06, 0.13, 0.12], [0, 0.26, 0.12], [0, 0.1, 0.14]]) {
+    const b = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 14), mat('#4fc38a')); b.position.set(x, y, 0); bush.add(b);
+  }
+  return [box, drum, bush].map((g) => { g.traverse((m) => { if (m.isMesh) { m.castShadow = m.receiveShadow = true; } }); return g; });
+}
+function removeHideProps() {
+  if (!hideProps) return;
+  const props = hideProps; hideProps = null;
+  for (const p of props) { p.pop = 1; const t0 = performance.now(); const shrink = () => { const e = (performance.now() - t0) / 300; p.scale.setScalar(Math.max(0.01, 1 - e)); if (e < 1) requestAnimationFrame(shrink); else scene.remove(p); }; shrink(); }
+}
+function startHideTraining() {
+  removeHideProps();
+  hideProps = makeHideProps().sort(() => Math.random() - 0.5);
+  const xs = [-0.35, 0, 0.35];
+  hideProps.forEach((p, i) => { p.position.set(xs[i], 0, -0.85); p.rotation.set(0, 0, 0); p.scale.setScalar(0.01); p.pop = 0; popping.add(p); scene.add(p); });
+  const pick = Math.floor(Math.random() * 3);
+  hideGame = { since: performance.now(), play: true, pick, tries: 0, ready: false };
+  dropFromMouth(); cleaning = false; pet.target = null; pet.onArrive = null; pet.state = 'idle';
+  emote('Count to 3!', '#ffd25e'); sfx.happy();
+  // Cover your eyes while it sneaks off.
+  const peek = $('peek'), txt = $('peekText');
+  const steps = ['🙈<br>Cover your eyes!', '3', '2', '1', 'Ready or not! 👀'];
+  peek.hidden = false;
+  steps.forEach((t, i) => setTimeout(() => { if (hideGame?.play) { txt.innerHTML = t; sfx.chirp(1 + i * 0.12); } }, i * 800));
+  setTimeout(() => {
+    const spot = new THREE.Vector3(xs[pick] + 0.03, floorY, -1.05);
+    travel(spot, true, () => { pet.state = 'hiding'; pet.rotation.y = 0; });
+  }, 500);
+  setTimeout(() => {
+    peek.hidden = true;
+    if (!hideGame?.play) return;
+    // Didn't make it in time? It's there anyway.
+    const spot = new THREE.Vector3(xs[pick] + 0.03, floorY, -1.05);
+    if (pet.position.distanceTo(spot) > 0.05) { pet.target = null; pet.onArrive = null; pet.position.copy(spot); }
+    pet.state = 'hiding'; pet.rotation.y = 0;
+    hideGame.ready = true; hideGame.since = performance.now();
+    toast(`Where is ${look.name}? Tap the hiding spot! 👆`);
+    tutHeld('hide');
+  }, steps.length * 800);
+}
+// A tap during Find Pip: is it behind that one?
+function guessHide(ray) {
+  if (!hideGame?.ready || !hideProps) return;
+  const i = hideProps.findIndex((p) => ray.intersectObject(p, true).length);
+  if (i < 0) return;
+  const p = hideProps[i];
+  if (i === hideGame.pick) { foundPet(); return; }
+  hideGame.tries++;
+  sfx.nope(); buzz(15);
+  emote(['not here!', 'nope!', 'empty!'][hideGame.tries % 3], '#ffffff', p.position.clone().setY(0.46));
+  const t0 = performance.now();
+  const wob = () => { const e = (performance.now() - t0) / 500; p.rotation.z = Math.sin(e * 20) * 0.1 * (1 - e); if (e < 1) requestAnimationFrame(wob); else p.rotation.z = 0; };
+  wob();
+  // After two misses: a giggle from the right spot.
+  if (hideGame.tries >= 2) setTimeout(() => {
+    if (!hideGame?.play) return;
+    const q = hideProps?.[hideGame.pick]; if (!q) return;
+    emote('hehe…', '#ffd25e', q.position.clone().setY(0.46)); sfx.squeak();
+    const t1 = performance.now();
+    const hop = () => { const e = (performance.now() - t1) / 600; q.position.y = Math.abs(Math.sin(e * Math.PI * 3)) * 0.03 * (1 - e); if (e < 1) requestAnimationFrame(hop); else q.position.y = 0; };
+    hop();
+  }, 900);
+}
 function startHide(self = false) {
+  if (mode === 'play') { startHideTraining(); return; }
   let spot;
   if (mode === 'play') {
     spot = hidingSpots[Math.floor(Math.random() * hidingSpots.length)].clone();
@@ -1601,7 +1679,19 @@ function startHide(self = false) {
   startHideBuzz();
 }
 function foundPet() {
-  hideGame = null; $('arrow').hidden = true; stopHideBuzz();
+  const wasPlay = hideGame?.play, pick = hideGame?.pick;
+  hideGame = null; $('arrow').hidden = true; stopHideBuzz(); $('peek').hidden = true;
+  if (wasPlay) {
+    const q = hideProps?.[pick];
+    if (q) { const t0 = performance.now(); const lift = () => { const e = Math.min(1, (performance.now() - t0) / 350); q.position.y = e * 0.12; q.rotation.z = e * 0.5; if (e < 1) requestAnimationFrame(lift); }; lift(); }
+    pet.state = 'idle'; pet.setVisibility(1);
+    setTimeout(() => travel(new THREE.Vector3(pet.position.x, floorY, -0.45), true, () => { pet.happy(3); hearts.burst(pet.localToWorld(new THREE.Vector3(0, 0.22, 0)), 8); }), 250);
+    setTimeout(removeHideProps, 1600);
+    emote('Found me!', '#7ee08a'); sfx.happy(); buzz([40, 60, 40, 60, 120]);
+    toast(`You found ${look.name}! 🎉`);
+    success('hide'); tutDone('hide');
+    return;
+  }
   buzz([40, 60, 40, 60, 120]);
   pet.state = 'idle'; pet.setVisibility(1); pet.happy(3); emote('Found me!', '#7ee08a');
   toast(`You found ${look.name}! 🎉`);
@@ -1622,7 +1712,7 @@ function startHideBuzz() {
     if (!hideGame) return;
     // Nobody looking? After a while it gives up and comes out.
     if (performance.now() - hideGame.since > 75000) {
-      hideGame = null; $('arrow').hidden = true; pet.state = 'idle'; pet.setVisibility(1);
+      hideGame = null; $('arrow').hidden = true; pet.state = 'idle'; pet.setVisibility(1); removeHideProps(); $('peek').hidden = true;
       emote('here I am!', '#ffd25e'); travel(frontOfYou(0.4), true, () => pet.happy(2)); return;
     }
     const d = mode === 'ar' ? hideDistance() : mode === 'cam' ? 0.6 + lookAngle() * 1.3 : 1.5;
@@ -1742,6 +1832,7 @@ function recall() {
   if (petInHand) { hopOut(); setTimeout(recall, 900); return; }
   // Drop whatever it was doing.
   if (hideGame) { hideGame = null; stopHideBuzz(); $('arrow').hidden = true; }
+  removeHideProps(); $('peek').hidden = true;
   stayMode = false; zoomUntil = 0; cleaning = false; wantsPat = 0; dropFromMouth();
   pocketScale = 1; pet.setVisibility(1); occl = 1;
   if (pet.state === 'sleep') { pet.inBed = false; emote('*yawn*'); }
@@ -1966,7 +2057,7 @@ function trackWalking(dt) {
 function setNames() { $('petName').textContent = look.name; document.querySelectorAll('.pn').forEach((e) => (e.textContent = look.name)); }
 $('exitBtn').onclick = () => {
   exitPhoto();
-  stopListening(); clearThrown(); hideGame = null; $('arrow').hidden = true; endTutorial(); controls.enabled = true;
+  stopListening(); clearThrown(); hideGame = null; $('arrow').hidden = true; removeHideProps(); $('peek').hidden = true; endTutorial(); controls.enabled = true;
   if (mode === 'ar') { renderer.xr.getSession()?.end(); return; }
   if (mode === 'cam') stopCam();
   stopHideBuzz(); pet.setVisibility(1); placed = false; setWalk(false); setVoiceOnly(false);
