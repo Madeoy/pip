@@ -171,6 +171,11 @@
       <div class="status" id="status" hidden></div>
       <div class="pill roomchip" id="roomChip" hidden>🏠 <span id="roomCount">0</span> spots learned</div>
       <div id="toast"></div>
+      <div id="snapFlash" style="position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:20"></div>
+      <div id="snapView" hidden style="position:fixed;inset:0;z-index:21;background:rgba(0,0,0,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:16px">
+        <img id="snapImg" alt="Photo" style="max-width:100%;max-height:70vh;border-radius:16px;border:4px solid #fff">
+        <div style="display:flex;gap:10px"><button class="pill" id="snapSave" style="background:#ffd25e;color:#3a2400;font-weight:800;padding:12px 20px;font-size:18px">📥 Save</button><button class="pill" id="snapShare" style="font-weight:800;padding:12px 20px;font-size:18px">📤 Share</button><button class="pill" id="snapClose" style="font-weight:800;padding:12px 20px;font-size:18px">✕</button></div>
+      </div>
       <button class="pill" id="hopOutBtn" hidden style="position:absolute;left:50%;transform:translateX(-50%);top:calc(96px + var(--safe-t));font-size:18px;font-weight:800;padding:10px 20px;background:#ffd25e;color:#3a2400;z-index:5">🤲 Hop out</button>
       <div id="arrow" hidden><i></i></div>
       <div id="tut" hidden>
@@ -187,6 +192,7 @@
           <button class="ib" id="ballBtn"><span>🎾</span><small>Ball</small></button>
           <button class="ib" id="treatBtn"><span>🦴</span><small>Treat</small></button>
           <button class="ib" id="waterBtn"><span>🍽️</span><small>Food</small></button>
+          <button class="ib" id="photoBtn"><span>📸</span><small>Photo</small></button>
           <button class="ib" id="upBtn"><span>🛋️</span><small>Hop up</small></button>
           <button class="ib" id="bedBtn"><span>🛏️</span><small>Bed</small></button>
           <button class="ib" id="hideBtn"><span>🙈</span><small>Hide</small></button>

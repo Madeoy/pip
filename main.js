@@ -811,6 +811,43 @@ $('waterBtn').addEventListener('pointerdown', () => { bowlHeld = false; bowlHold
 for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) $('waterBtn').addEventListener(ev, () => clearTimeout(bowlHold));
 $('waterBtn').onclick = () => { if (bowlHeld) return; feed('both'); };
 let placingBowls = null;
+
+/* ---------------- photo: Pip smiles, you save the picture ---------------- */
+let snapNext = false, snapping = false;
+function takePhoto() {
+  if (!pet || snapping) return;
+  const p = pet.position.clone().project(camera);
+  if (p.z > 1 || Math.abs(p.x) > 1 || Math.abs(p.y) > 1) { toast('Point your phone at ' + look.name + ' to take a picture 📸'); return; }
+  snapping = true; pet.target = null; pet.faceYaw = null; if (pet.state !== 'sit') pet.sit();
+  toast('Say cheese! 📸');
+  [3, 2, 1].forEach((n, i) => setTimeout(() => { emote(String(n), '#ffd25e'); sfx.chirp(1 + i * 0.15); }, i * 700));
+  setTimeout(() => { pet.state = 'sit'; pet.faceYaw = null; pet.mouthOpen = true; emote('cheese!', '#ff7eb3'); }, 2100);
+  setTimeout(() => { for (const e of emotes.children) e.visible = false; snapNext = true; }, 2700);
+}
+function grabPhoto() {
+  const W = canvas.width, H = canvas.height, out = document.createElement('canvas'); out.width = W; out.height = H;
+  const g = out.getContext('2d'), v = $('camfeed');
+  if (!v.hidden && v.videoWidth) {
+    const sc = Math.max(W / v.videoWidth, H / v.videoHeight), sw = W / sc, sh = H / sc;
+    g.drawImage(v, (v.videoWidth - sw) / 2, (v.videoHeight - sh) / 2, sw, sh, 0, 0, W, H);
+  } else { g.fillStyle = getComputedStyle(document.body).backgroundColor || '#2a1f4a'; g.fillRect(0, 0, W, H); }
+  g.drawImage(canvas, 0, 0, W, H);
+  for (const e of emotes.children) e.visible = true;
+  pet.mouthOpen = false; pet.happy(2); emote('♥', '#ff7eb3'); snapping = false;
+  const f = $('snapFlash'); f.style.transition = 'none'; f.style.opacity = 1; requestAnimationFrame(() => { f.style.transition = 'opacity .5s'; f.style.opacity = 0; });
+  tone(1800, 900, 0.06, 'square', 0.12);
+  out.toBlob((b) => {
+    if (!b) return;
+    const url = URL.createObjectURL(b), name = look.name.replace(/\W+/g, '') + '-' + new Date().toISOString().slice(0, 19).replace(/\D/g, '') + '.png';
+    $('snapImg').src = url; $('snapView').hidden = false;
+    $('snapSave').onclick = () => { const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); toast('Saved to your phone 📥'); };
+    const file = new File([b], name, { type: 'image/png' });
+    $('snapShare').hidden = !(navigator.canShare && navigator.canShare({ files: [file] }));
+    $('snapShare').onclick = () => navigator.share({ files: [file] }).catch(() => {});
+    $('snapClose').onclick = () => { $('snapView').hidden = true; URL.revokeObjectURL(url); };
+  }, 'image/png');
+}
+$('photoBtn').onclick = takePhoto;
 // Bowls stay where you put them. Ask again and they get refilled.
 function feed(which) {
   if (!pet?.parent) return;
@@ -1400,6 +1437,7 @@ function checkFound() {
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, listening = false;
 const COMMANDS = [
+  [/\b(take a (picture|photo|pic|selfie)|picture|photo|selfie|say cheese|cheese|smile|snap)\b/, 'photo'],
   [/\b(hop up|climb up|jump up|get up|up there|up on|on the (table|couch|sofa|chair|seat)|onto the)\b/, 'up'],
   [/\b(hop in|hop on (my )?hand|climb in|climb on (my )?hand|jump in|in my hand|up you go|get in)\b/, 'hopin'],
   [/\b(hop out|hop off|hop down|climb out|climb off|climb down|get out|get off|jump out|jump down|all done|i'm done|im done|put you down|down you go|out you go)\b/, 'hopout'],
@@ -1516,6 +1554,7 @@ function onSpeech(text) {
     case 'water': feed('water'); return;
     case 'food': feed('food'); return;
     case 'nobowls': removeBowls(); return;
+    case 'photo': takePhoto(); return;
     case 'cleanup': cleanUp(); return;
     case 'follow': setWalk(true); return;
     case 'sleep': if (pet.state !== 'sleep') goToBedAndNap(); return;
@@ -1848,6 +1887,7 @@ function tick(time, frame) {
   hearts.update(dt); updateEmotes(dt);
   updateArrow();
   renderer.render(scene, camera);
+  if (snapNext) { snapNext = false; grabPhoto(); }
   if (pet && (!Number.isFinite(pet.position.x) || !Number.isFinite(pet.position.y) || !Number.isFinite(pet.position.z))) healPet();
 }
 function healPet() {
