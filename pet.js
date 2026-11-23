@@ -272,7 +272,7 @@ export class Pet extends THREE.Group {
   // Jump to a point at a different height (onto a table, or back down).
   leapTo(point, onLand) {
     this.target = null;
-    this.leapFrom = this.position.clone(); this.leapTo = point.clone();
+    this.leapFromV = this.position.clone(); this.leapToV = point.clone();
     const d = Math.hypot(point.x - this.position.x, point.z - this.position.z);
     this.leapT = 0; this.leapDur = 0.45 + d * 0.5;
     this.leapH = 0.12 + Math.max(0, point.y - this.position.y) * 0.5;
@@ -346,9 +346,9 @@ export class Pet extends THREE.Group {
       this.leapT += dt;
       const p = Math.min(1, this.leapT / this.leapDur);
       const e = p * p * (3 - 2 * p);
-      this.position.lerpVectors(this.leapFrom, this.leapTo, e);
+      this.position.lerpVectors(this.leapFromV, this.leapToV, e);
       this.position.y += Math.sin(p * Math.PI) * this.leapH;
-      const to = this.leapTo.clone().sub(this.leapFrom);
+      const to = this.leapToV.clone().sub(this.leapFromV);
       if (to.x || to.z) this.rotation.y = lerpAngle(this.rotation.y, Math.atan2(to.x, to.z), 1 - Math.exp(-dt * 12));
       if (p >= 1) { this.state = 'idle'; const cb = this.onLand; this.onLand = null; cb?.(); }
     }

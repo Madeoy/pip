@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=13';
-import { HandSeer } from './hand.js?v=13';
+import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=14';
+import { HandSeer } from './hand.js?v=14';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'pip-pet-v1';
@@ -610,12 +610,12 @@ function puppyQuirks(dt) {
 let zoom = 1, zoomOrigin = { x: innerWidth / 2, y: innerHeight / 2 };
 function updateZoom(dt) {
   let want = 1;
-  if (mode === 'cam' && pet?.parent && pet.visible) {
+  if (mode === 'cam' && pet?.parent && pet.visible && !petInHand && pet.state !== 'leap') {
     const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd);
     const p = pet.localToWorld(new THREE.Vector3(0, 0.08, 0)).project(camera);
     const centered = p.z < 1 && Math.abs(p.x) < 0.4 && Math.abs(p.y) < 0.45;
     if (centered && fwd.y < -0.4) {
-      want = 1.55;
+      want = 1.35;
       zoomOrigin.x += (((p.x + 1) / 2) * innerWidth - zoomOrigin.x) * Math.min(1, dt * 3);
       zoomOrigin.y += (((1 - p.y) / 2) * innerHeight - zoomOrigin.y) * Math.min(1, dt * 3);
     }
@@ -1672,6 +1672,9 @@ function frameCamera(which) {
   controls.update();
 }
 
+addEventListener('error', (e) => { try { toast('Oops: ' + (e.message || 'something broke') + ' — say "come" to reset'); } catch {} });
+addEventListener('unhandledrejection', (e) => { console.warn(e.reason); });
+window.__pip = { get pet() { return pet; }, THREE };  // handy for testing
 /* ---------------- boot ---------------- */
 buildCreator();
 frameCamera('create');
