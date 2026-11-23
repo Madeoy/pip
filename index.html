@@ -119,6 +119,19 @@
     #hud.voiceonly .dock, #hud.voiceonly .top, #hud.voiceonly .roomchip, #hud.voiceonly .status, #hud.voiceonly .heard { display: none !important; }
     #hud.voiceonly.walking #walkOff { display: none !important; }
     #hud.walking #hopOutBtn:not([hidden]), #hud.voiceonly #hopOutBtn:not([hidden]) { display: block !important; }
+    #tut { position: absolute; left: 50%; transform: translateX(-50%); top: calc(64px + var(--safe-t)); width: min(calc(100% - 24px), 380px); padding: 12px 14px; border-radius: 20px; background: rgba(255,255,255,.95); color: #2a1a5e; box-shadow: 0 8px 24px rgba(0,0,0,.3); z-index: 4; }
+    .tut-dots { display: flex; gap: 5px; justify-content: center; margin-bottom: 6px; }
+    .tut-dots i { width: 8px; height: 8px; border-radius: 50%; background: #d9d2ff; }
+    .tut-dots i.done { background: #7c5cff; }
+    .tut-dots i.now { background: #ff7eb3; transform: scale(1.3); }
+    .tut-text { display: flex; gap: 10px; align-items: center; font-size: 18px; font-weight: 700; line-height: 1.25; }
+    .tut-text #tutIcon { font-size: 34px; }
+    .tut-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+    .tut-row button { border: 0; border-radius: 999px; padding: 7px 14px; font: inherit; font-weight: 700; font-size: 14px; background: #eee9ff; color: #5a3fd6; }
+    .tut-row #tutGo { background: linear-gradient(90deg, #8f5bff, #ff7eb3); color: #fff; font-size: 16px; flex: 1; }
+    .ib.pulse { animation: pulse 1.1s ease-in-out infinite; border-radius: 16px; }
+    @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,210,94,.9); } 50% { box-shadow: 0 0 0 8px rgba(255,210,94,0); background: rgba(255,210,94,.35); } }
+    .mic.pulse { animation: pulse 1.1s ease-in-out infinite; }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -160,6 +173,11 @@
       <div id="toast"></div>
       <button class="pill" id="hopOutBtn" hidden style="position:absolute;left:50%;transform:translateX(-50%);top:calc(96px + var(--safe-t));font-size:18px;font-weight:800;padding:10px 20px;background:#ffd25e;color:#3a2400;z-index:5">🤲 Hop out</button>
       <div id="arrow" hidden><i></i></div>
+      <div id="tut" hidden>
+        <div class="tut-dots" id="tutDots"></div>
+        <div class="tut-text"><span id="tutIcon">👋</span><span id="tutText"></span></div>
+        <div class="tut-row"><button id="tutGo" hidden></button><button id="tutSkip">Skip</button></div>
+      </div>
       <p class="heard" id="heard">Tap 🎤 and talk to <b class="pn">Pip</b></p>
       <div class="dock" id="dock">
         <button class="mic" id="micBtn" aria-label="Talk">🎤</button>
@@ -184,6 +202,48 @@
       </div>
     </div>
   </div>
-  <script type="module" src="main.js?v=15"></script>
+  <div id="rescue" hidden style="position:fixed;inset:0;z-index:99;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(20,12,50,.92)">
+    <div class="panel" style="max-width:360px;padding:20px;text-align:center">
+      <h3 style="margin:0 0 8px">Pip got stuck 😿</h3>
+      <p id="rescueWhy" style="margin:0 0 10px;font-size:15px"></p>
+      <p style="margin:0 0 14px;font-size:12px;opacity:.7" id="rescueErr"></p>
+      <button class="big" id="rescueSave">💾 Save my pets first</button>
+      <button class="big alt" id="rescueRetry" style="margin-top:8px">Try again</button>
+    </div>
+  </div>
+  <script>
+  // Safety net: if the app can't start, say why and let you save your pets anyway.
+  (function () {
+    var errs = [];
+    function shown() { return !document.getElementById('rescue').hidden; }
+    function show() {
+      if (window.__pipReady || shown()) return;
+      var e = errs.join(' · ') || 'It took too long to start.';
+      var gl = /webgl|context/i.test(e);
+      document.getElementById('rescueWhy').textContent = gl
+        ? 'This browser turned off 3D for the page. Close ALL tabs of this browser (swipe it away), then open Pip again. If that does not work, restart your phone.'
+        : 'Something did not load. Check your internet, then tap Try again. Your pets are still saved on this phone.';
+      document.getElementById('rescueErr').textContent = e.slice(0, 200);
+      document.getElementById('rescue').hidden = false;
+    }
+    addEventListener('error', function (ev) {
+      var t = ev.target;
+      errs.push(ev.message || (t && t.src ? 'Could not load ' + t.src.split('/').pop() : 'load error'));
+      if (!window.__pipReady) setTimeout(show, 300);
+    }, true);
+    addEventListener('DOMContentLoaded', function () {
+      document.getElementById('rescueRetry').onclick = function () { location.reload(); };
+      document.getElementById('rescueSave').onclick = function () {
+        var data = localStorage.getItem('pip-pets-v2') || localStorage.getItem('pip-pet-v1') || '{}';
+        try { var d = JSON.parse(data); d.app = 'pip'; d.version = 2; data = JSON.stringify(d, null, 1); } catch (x) {}
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
+        a.download = 'my-pip-pets.json'; document.body.appendChild(a); a.click();
+      };
+    });
+    setTimeout(show, 12000);
+  })();
+  </script>
+  <script type="module" src="main.js?v=16"></script>
 </body>
 </html>

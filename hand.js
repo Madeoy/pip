@@ -21,7 +21,8 @@ export class HandSeer {
         baseOptions: { modelAssetPath: MODEL, delegate }, runningMode: 'VIDEO', numHands: 1,
         minHandDetectionConfidence: 0.5, minTrackingConfidence: 0.5,
       });
-      try { this.lm = await make('GPU'); } catch { this.lm = await make('CPU'); }
+      // CPU is gentler: the GPU version opens a second 3D context, which can make some phones shut 3D off.
+      try { this.lm = await make('CPU'); } catch { this.lm = await make('GPU'); }
     } catch (e) { console.warn('Hand tracking unavailable', e); this.running = false; return; }
     this.loop();
   }

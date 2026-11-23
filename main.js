@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=15';
-import { HandSeer } from './hand.js?v=15';
+import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=16';
+import { HandSeer } from './hand.js?v=16';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'pip-pet-v1';
@@ -313,10 +313,55 @@ async function startPlay() {
   setNames();
   pet.position.set(0, 0, 0); pet.rotation.y = 0;
   frameCamera('play');
+  controls.enabled = false;   // the cartoon room camera stays still — no spinning
   persist();
   armKnock(); setTimeout(greet, 400);
-  toast(`Tap the mic and say "${look.name}, sit!"`);
+  startTutorial();
 }
+
+/* ---------------- cartoon room = a calm, step-by-step lesson ---------------- */
+const TUT = [
+  { id: 'pat',   icon: '👋', text: () => `Say hi! Tap ${look.name} to give a pat.` },
+  { id: 'ball',  icon: '🎾', btn: 'ballBtn', text: () => `Tap 🎾 Ball. Then swipe up to throw it.`, held: () => `Now swipe up on the screen to throw!` },
+  { id: 'food',  icon: '🥕', btn: 'waterBtn', text: () => `${look.name} is hungry. Tap 🍽️ Food for dinner.` },
+  { id: 'trick', icon: '🎤', btn: 'micBtn', text: () => `Teach a trick! Tap 🎤 and say “${look.name}, sit!”`, skip: 'Use a button instead' },
+  { id: 'bed',   icon: '🛏️', btn: 'bedBtn', text: () => `Time for bed. Tap 🛏️ Bed.`, held: () => `Now tap a spot on the floor for the bed.` },
+  { id: 'done',  icon: '🎉', text: () => `You did it! ${look.name} loves you.` },
+];
+let tutI = -1;
+function startTutorial() { tutI = 0; $('tut').hidden = false; showTut(); }
+function endTutorial() {
+  tutI = -1; $('tut').hidden = true;
+  for (const el of document.querySelectorAll('.pulse')) el.classList.remove('pulse');
+}
+function showTut(sub = false) {
+  const s = TUT[tutI]; if (!s) return endTutorial();
+  for (const el of document.querySelectorAll('.pulse')) el.classList.remove('pulse');
+  if (s.btn && !sub) { const b = $(s.btn); b.classList.add('pulse'); b.scrollIntoView?.({ inline: 'center', block: 'nearest', behavior: 'smooth' }); }
+  $('tutIcon').textContent = s.icon;
+  $('tutText').textContent = sub && s.held ? s.held() : s.text();
+  $('tutDots').innerHTML = TUT.slice(0, -1).map((_, i) => `<i class="${i < tutI ? 'done' : i === tutI ? 'now' : ''}"></i>`).join('');
+  const go = $('tutGo'), skip = $('tutSkip');
+  if (s.id === 'done') {
+    const canRoom = !$('goAR').hidden;
+    go.hidden = false; go.textContent = canRoom ? `Bring ${look.name} into my room ✨` : 'Keep playing';
+    go.onclick = () => { endTutorial(); if (canRoom) { $('exitBtn').onclick(); $('goAR').onclick(); } };
+    skip.textContent = 'Close'; skip.onclick = endTutorial;
+  } else if (s.id === 'trick') {
+    // Voice might not work in every browser — the Sit button teaches it too.
+    go.hidden = false; go.textContent = '🐾 Sit button'; go.onclick = () => { doTrick('sit', true); success('sit'); tutDone('trick'); };
+    skip.textContent = 'Skip'; skip.onclick = () => tutDone('trick');
+  } else {
+    go.hidden = true;
+    skip.textContent = tutI === 0 ? 'Skip lesson' : 'Skip'; skip.onclick = () => (tutI === 0 ? endTutorial() : tutDone(s.id));
+  }
+}
+function tutDone(id) {
+  if (tutI < 0 || TUT[tutI]?.id !== id) return;
+  tutI++; sfx.happy?.();
+  setTimeout(() => { if (tutI >= 0) showTut(); }, 900);   // a beat to enjoy it before the next step
+}
+function tutHeld(id) { if (tutI >= 0 && TUT[tutI]?.id === id) showTut(true); }
 
 async function startAR() {
   audio().resume?.();
@@ -510,7 +555,7 @@ function makeBed() {
   g.add(rim, pad); return g;
 }
 $('bedBtn').onclick = () => {
-  placingBed = true;
+  placingBed = true; tutHeld('bed');
   toast(`Tap a spot on the floor for ${look.name}'s bed 🛏️`);
 };
 function placeBed(p) {
@@ -520,6 +565,8 @@ function placeBed(p) {
   sfx.happy(); emote('my bed!', '#ff7eb3');
   toast(`Bed placed! Say "take a nap" and ${look.name} will sleep there`);
   persist();
+  if (tutI >= 0 && TUT[tutI]?.id === 'bed') setTimeout(() => doTrick('sleep', true), 700);
+  tutDone('bed');
 }
 function nearBed() {
   if (!bed?.parent) return true;
@@ -653,9 +700,9 @@ function handleTap(ray) {
   if (ray.intersectObject(pet, true).length) {
     if (hideGame) return foundPet();
     if (pet.state === 'sleep') { pet.hop(); emote('!'); return; }
-    if (wantsPat) { pat(); return; }
+    if (wantsPat) { pat(); tutDone('pat'); return; }
     sfx.squeak(); pet.happy(2); emote('♥', '#ff7eb3');
-    praise();
+    praise(); tutDone('pat');
     return;
   }
   const hit = new THREE.Vector3();
@@ -677,6 +724,7 @@ function holdItem(kind) {
   camera.add(obj);
   inHand = obj;
   controls.enabled = false;   // swipes throw instead of turning the camera
+  if (kind === 'ball') tutHeld('ball');
   toast(isTouch ? 'Swipe up — or flick your phone — to throw!' : 'Drag upward to throw!');
   sfx.chirp(1.6);
   armFlick();
@@ -689,6 +737,7 @@ let foodBowl = null;
 function placeWater() { placeBowls('water'); }
 function placeBowls(which = 'both') {
   if (!pet?.parent) return;
+  setTimeout(() => tutDone('food'), 2500);
   const front = frontOfYou(0.45);
   const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
   const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
@@ -911,15 +960,16 @@ function armFlick() {
 function throwHeld(power, sideways = 0) {
   if (!inHand) return;
   const obj = inHand; inHand = null; lastThrowAt = performance.now();
-  setTimeout(() => { if (mode === 'play') controls.enabled = true; }, 50);
   const wp = new THREE.Vector3(); obj.getWorldPosition(wp);
   camera.remove(obj); scene.add(obj); obj.position.copy(wp);
   const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd);
   const flat = new THREE.Vector3(fwd.x, 0, fwd.z).normalize();
   const right = new THREE.Vector3(-flat.z, 0, flat.x);
   const dir = flat.clone().addScaledVector(right, THREE.MathUtils.clamp(sideways, -0.8, 0.8) * 0.6).normalize();
-  const sp = 1.2 + power * 2.6;
-  obj.vel = dir.multiplyScalar(sp).add(new THREE.Vector3(0, 1.2 + power * 1.4, 0));
+  // Gentler throws in the cartoon room so the ball stays on screen.
+  const sp = mode === 'play' ? 0.8 + power * 1.2 : 1.2 + power * 2.6;
+  obj.vel = dir.multiplyScalar(sp).add(new THREE.Vector3(0, mode === 'play' ? 1 + power * 0.6 : 1.2 + power * 1.4, 0));
+  if (obj.kind === 'ball') setTimeout(() => tutDone('ball'), 1500);
   obj.spin = new THREE.Vector3(Math.random() * 10, Math.random() * 10, 0);
   obj.landed = false;
   thrown.push(obj);
@@ -1015,6 +1065,7 @@ function clearThrown() { for (const o of [...thrown]) removeThrown(o); if (inHan
 
 function frontOfYou(dist = 0.4) {
   if (mode === 'cam') dist = Math.min(Math.max(dist, 0.7), 1.2);
+  if (mode === 'play') dist += 0.4;   // cartoon camera sits further back; keep things in view above the buttons
   const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
   const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
   return new THREE.Vector3(cp.x + fwd.x * dist, floorY, cp.z + fwd.z * dist);
@@ -1039,7 +1090,7 @@ function obey(cmd, quiet = false) {
   const tiredPenalty = needs.energy < 25 ? 0.3 : 0;
   if (tiredPenalty && Math.random() < 0.4) { emote('*yawn*'); return false; }
   // A little mischief: sometimes it just runs off!
-  if (Math.random() < 0.07 && cmd !== 'fetch' && !tiredPenalty) { runAway(); return false; }
+  if (mode !== 'play' && Math.random() < 0.07 && cmd !== 'fetch' && !tiredPenalty) { runAway(); return false; }
   if (Math.random() < 0.3 + s * 0.65 - tiredPenalty) return true;
   if (!quiet) {
     // Confused: does the wrong thing or tilts its head.
@@ -1055,6 +1106,7 @@ function success(cmd) {
   skills[cmd] = Math.min(1, (skills[cmd] ?? 0.3) + 0.07);
   lastSuccess = { cmd, t: performance.now() };
   persist();
+  if (cmd !== 'fetch' && cmd !== 'come') tutDone('trick');
 }
 function praise(treat = false) {
   if (lastSuccess && performance.now() - lastSuccess.t < 8000) {
@@ -1518,7 +1570,7 @@ function trackWalking(dt) {
 /* ---------------- HUD ---------------- */
 function setNames() { $('petName').textContent = look.name; document.querySelectorAll('.pn').forEach((e) => (e.textContent = look.name)); }
 $('exitBtn').onclick = () => {
-  stopListening(); clearThrown(); hideGame = null; $('arrow').hidden = true;
+  stopListening(); clearThrown(); hideGame = null; $('arrow').hidden = true; endTutorial(); controls.enabled = true;
   if (mode === 'ar') { renderer.xr.getSession()?.end(); return; }
   if (mode === 'cam') stopCam();
   stopHideBuzz(); pet.setVisibility(1); placed = false; setWalk(false); setVoiceOnly(false);
@@ -1677,7 +1729,7 @@ function tick(time, frame) {
     if (bowl && bowl.pop !== undefined && bowl.pop < 1) { bowl.pop = Math.min(1, bowl.pop + dt * 4); bowl.scale.setScalar(Math.max(0.01, bowl.pop)); }
     // Self-started mischief every so often.
     nextMischief -= dt;
-    if (nextMischief < 0 && !stayMode && !wantsPat && pet && pet.parent && pet.state === 'idle' && !hideGame && !inHand && !sick && needs.energy > 30 && thrown.every((o) => !o.held) && (mode !== 'ar' || placed)) {
+    if (mode !== 'play' && nextMischief < 0 && !stayMode && !wantsPat && pet && pet.parent && pet.state === 'idle' && !hideGame && !inHand && !sick && needs.energy > 30 && thrown.every((o) => !o.held) && (mode !== 'ar' || placed)) {
       armKnock();
       nextMischief = 50 + Math.random() * 50;
       if (Math.random() < 0.5) startHide(true); else runAway();
@@ -1720,7 +1772,8 @@ function frameCamera(which) {
     camera.setViewOffset(W, H, 0, H / 2 - yc, W, H);
   }
   // Aim below the pet so it sits in the upper-middle of the screen, clear of the bottom panel.
-  else { camera.clearViewOffset(); camera.position.set(0, 0.45, portrait ? 1.1 : 0.78); controls.target.set(0, portrait ? -0.14 : -0.06, 0.06); }
+  // Pet sits mid-screen: clear of the lesson card on top and the buttons below.
+  else { camera.clearViewOffset(); camera.position.set(0, 0.55, portrait ? 1.3 : 0.85); controls.target.set(0, portrait ? 0.02 : -0.02, 0.06); }
   controls.update();
 }
 
@@ -1732,6 +1785,11 @@ buildCreator();
 frameCamera('create');
 document.fonts?.ready?.then(() => { if (mode === 'create') frameCamera('create'); });
 refreshPet();
+persist();   // so a brand-new pet shows up in My pets right away
+window.__pipReady = true;
+// If the phone takes the 3D away (low memory), save and come back cleanly instead of freezing.
+canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); persist(); toast('Phone needed a breather — reloading…'); });
+canvas.addEventListener('webglcontextrestored', () => location.reload());
 (async () => {
   xrOK = !!(navigator.xr && (await navigator.xr.isSessionSupported('immersive-ar').catch(() => false)));
   const hasCam = !!navigator.mediaDevices?.getUserMedia && isTouch;
