@@ -147,6 +147,8 @@
     #shutterBtn { width: 78px; height: 78px; border-radius: 50%; border: 6px solid #fff; background: rgba(255,255,255,.35); box-shadow: 0 4px 16px rgba(0,0,0,.35); }
     #shutterBtn:active { background: #fff; transform: scale(.94); }
     #photoExit { position: absolute; right: 16px; bottom: 26px; padding: 10px 16px; font-weight: 800; }
+    #selfieBtn { position: absolute; left: 16px; bottom: 26px; padding: 10px 14px; font-weight: 800; }
+    #photoUI.selfie .zoom-btns, #photoUI.selfie .photo-hint { visibility: hidden; }
     #hud.photo .dock, #hud.photo .heard, #hud.photo #status, #hud.photo #tut, #hud.photo #arrow { display: none !important; }
     #hud.photo #toast { bottom: calc(200px + var(--safe-b)) !important; top: auto !important; }
     [hidden] { display: none !important; }
@@ -195,6 +197,7 @@
           <div class="zoom-btns" id="zoomBtns"><button data-z="1">1x</button><button data-z="2">2x</button><button data-z="3">3x</button></div>
           <button id="shutterBtn" aria-label="Take the picture"></button>
           <button class="pill" id="photoExit" aria-label="Done taking pictures">Done</button>
+          <button class="pill" id="selfieBtn" aria-label="Switch to selfie camera" hidden>🔄 Selfie</button>
         </div>
       </div>
       <div id="snapFlash" style="position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:20"></div>
@@ -287,6 +290,6 @@
     setTimeout(show, 12000);
   })();
   </script>
-  <script type="module" src="main.js?v=22"></script>
+  <script type="module" src="main.js?v=23"></script>
 </body>
 </html>

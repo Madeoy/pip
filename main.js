@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=22';
-import { HandSeer } from './hand.js?v=22';
-import { WalkMap } from './walk.js?v=22';
+import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=23';
+import { HandSeer } from './hand.js?v=23';
+import { WalkMap } from './walk.js?v=23';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'pip-pet-v1';
@@ -724,6 +724,7 @@ function puppyQuirks(dt) {
 let zoom = 1, zoomOrigin = { x: innerWidth / 2, y: innerHeight / 2 };
 function updatePhotoZoom(dt) {
   zoom = 1; canvas.style.transform = '';
+  if (selfie) { holdSelfie(); return; }
   const W = innerWidth, H = innerHeight, z = photoZoom;
   // Where is the pet on the un-zoomed screen? Follow it smoothly.
   if (pet?.parent) {
@@ -841,11 +842,13 @@ function enterPhoto() {
   if (mode === 'ar') { takePhoto(); return; }   // full AR has its own camera; just snap
   photoMode = true; photoBaseFov = camera.fov;
   $('hud').classList.add('photo'); $('photoUI').hidden = false; setNames();
+  $('selfieBtn').hidden = mode !== 'cam'; $('selfieBtn').textContent = '🔄 Selfie';
   setPhotoZoom(1);
   if (pet && !petInHand && pet.state === 'idle') { pet.target = null; pet.faceYaw = null; pet.sit(); }
 }
 function exitPhoto() {
   if (!photoMode) return;
+  if (selfie) endSelfie();
   setPhotoZoom(1); photoMode = false;
   camera.clearViewOffset(); camera.fov = photoBaseFov; camera.updateProjectionMatrix();
   $('camfeed').style.transform = '';
@@ -858,6 +861,54 @@ function setPhotoZoom(z) {
 for (const b of document.querySelectorAll('#zoomBtns button')) b.onclick = () => { setPhotoZoom(+b.dataset.z); sfx.chirp(1 + +b.dataset.z * 0.1); };
 $('shutterBtn').onclick = takePhoto;
 $('photoExit').onclick = exitPhoto;
+
+/* ---------------- selfie: front camera, your pet pops up next to you ---------------- */
+var selfie = false;
+const SELFIE_SPOT = new THREE.Vector3();
+async function swapCamera(facing) {
+  const old = camStream;
+  let s = null;
+  try { s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facing }, width: { ideal: 1280 } }, audio: false }); }
+  catch { try { s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing }, audio: false }); } catch {} }
+  if (!s) return false;
+  old?.getTracks().forEach((t) => t.stop());
+  if (mode !== 'cam') { s.getTracks().forEach((t) => t.stop()); return false; }   // left camera mode while waiting
+  camStream = s; const v = $('camfeed'); v.srcObject = s; await v.play().catch(() => {});
+  return true;
+}
+async function startSelfie() {
+  if (mode !== 'cam' || selfie) return;
+  $('selfieBtn').disabled = true;
+  hand?.stop();
+  const ok = await swapCamera('user');
+  $('selfieBtn').disabled = false;
+  if (!ok) { toast("Couldn't open the front camera"); startHandSeer(); return; }
+  selfie = true; setPhotoZoom(1);
+  $('photoUI').classList.add('selfie'); $('selfieBtn').textContent = '🔄 Back camera';
+  pet.target = null; pet.onArrive = null; pet.faceYaw = null; pet.state = 'idle';
+  pet.scale.setScalar(0.01); pet.popIn = 0;   // pops in next to you
+  setTimeout(() => { if (selfie) { pet.happy(2); emote('selfie!', '#ff7eb3'); sfx.happy(); } }, 500);
+}
+async function endSelfie() {
+  if (!selfie) return;
+  selfie = false;
+  $('photoUI').classList.remove('selfie'); $('selfieBtn').textContent = '🔄 Selfie';
+  $('camfeed').style.transform = ''; shadowCatcher.visible = mode === 'cam';
+  pet.position.copy(clampToPlay(frontOfYou(0.9))); pet.rotation.y = 0; pet.scale.setScalar(0.01); pet.popIn = 0;
+  if (mode === 'cam') { await swapCamera('environment'); startHandSeer(); }
+}
+$('selfieBtn').onclick = () => (selfie ? endSelfie() : startSelfie());
+// Each frame in selfie: hold the view still and keep the pet beside you, looking at the camera.
+function holdSelfie() {
+  camera.position.set(0, 1.15, 0); camera.quaternion.identity(); camera.clearViewOffset();
+  // Lower-left of the picture, above the buttons, fully on screen whatever the phone's shape.
+  const d = 0.75, halfH = d * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), halfW = halfH * camera.aspect;
+  SELFIE_SPOT.set(Math.min(0, -(halfW - 0.17)), 1.15 - halfH * 0.42 - 0.03, -d);
+  if (pet.state !== 'leap') { pet.position.copy(SELFIE_SPOT); pet.target = null; }
+  pet.rotation.y = 0.25;   // turned a little toward you
+  shadowCatcher.visible = false;   // no floor in a selfie
+  const v = $('camfeed'); v.style.transformOrigin = '50% 50%'; v.style.transform = 'scaleX(-1)';   // mirror, like a real selfie
+}
 // Pinch with two fingers to zoom.
 const pinchPts = new Map(); let pinchStart = null;
 const pinchDist = () => { const [a, b] = [...pinchPts.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
@@ -885,7 +936,12 @@ function takePhoto() {
 function grabPhoto() {
   const W = canvas.width, H = canvas.height, out = document.createElement('canvas'); out.width = W; out.height = H;
   const g = out.getContext('2d'), v = $('camfeed');
-  if (!v.hidden && v.videoWidth) {
+  if (!v.hidden && v.videoWidth && selfie) {
+    const sc = Math.max(W / v.videoWidth, H / v.videoHeight), sw = W / sc, sh = H / sc;
+    g.save(); g.translate(W, 0); g.scale(-1, 1);   // mirrored, same as on screen
+    g.drawImage(v, (v.videoWidth - sw) / 2, (v.videoHeight - sh) / 2, sw, sh, 0, 0, W, H);
+    g.restore();
+  } else if (!v.hidden && v.videoWidth) {
     const pz = photoMode ? photoZoom : 1, k = W / innerWidth;
     const sc = Math.max(W / v.videoWidth, H / v.videoHeight), sw = W / sc / pz, sh = H / sc / pz;
     // The same part of the camera picture you see in the zoomed viewfinder.
@@ -1940,7 +1996,7 @@ function tick(time, frame) {
     controls.update();
   } else {
     if (mode === 'play') controls.update();
-    if (mode === 'cam') { applyOrientation(); recordAim(); if (walk && pet) { walk.update(dt, walk.s[walk.idx(pet.position.x, pet.position.z)] > 0.3 ? [pet.position] : []); unstick(dt); } }
+    if (mode === 'cam' && !selfie) { applyOrientation(); recordAim(); if (walk && pet) { walk.update(dt, walk.s[walk.idx(pet.position.x, pet.position.z)] > 0.3 ? [pet.position] : []); unstick(dt); } }
     if (pet && pet.parent) {
       if (pet.popIn !== undefined && pet.popIn < 1) { pet.popIn = Math.min(1, pet.popIn + dt * 3); const s = 1 - Math.pow(1 - pet.popIn, 3) * 1; pet.scale.setScalar(Math.max(0.01, s * (1 + Math.sin(pet.popIn * Math.PI) * 0.15))); }
       pet.update(dt, camPos);
