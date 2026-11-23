@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=19';
-import { HandSeer } from './hand.js?v=19';
-import { WalkMap } from './walk.js?v=19';
+import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=21';
+import { HandSeer } from './hand.js?v=21';
+import { WalkMap } from './walk.js?v=21';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'pip-pet-v1';
@@ -1082,26 +1082,49 @@ function armFlick() {
   if (flickArmed) return; flickArmed = true;
   const DME = window.DeviceMotionEvent;
   if (DME && typeof DME.requestPermission === 'function') DME.requestPermission().catch(() => {});
+  // Watch the whole flick, then throw with its strongest moment (not the first wiggle).
+  let flick = null;
   addEventListener('devicemotion', (e) => {
-    if (!inHand) return;
-    const a = e.acceleration || {};
-    const mag = Math.hypot(a.x || 0, a.y || 0, a.z || 0);
-    if (mag > 14) throwHeld(Math.min(1, 0.25 + (mag - 14) / 25), 0);
+    if (!inHand) { flick = null; return; }
+    let mag;
+    if (e.acceleration && e.acceleration.x != null) { const a = e.acceleration; mag = Math.hypot(a.x, a.y, a.z); }
+    else { const g = e.accelerationIncludingGravity || {}; mag = Math.max(0, Math.hypot(g.x || 0, g.y || 0, g.z || 0) - 9.8); }
+    const now = performance.now();
+    if (!flick) { if (mag > 12) flick = { start: now, peak: mag, aim: aimHeading(now - 250) }; return; }
+    flick.peak = Math.max(flick.peak, mag);
+    if (now - flick.start > 160) {
+      const f = flick; flick = null;
+      throwHeld(Math.min(1, 0.12 + (f.peak - 12) / 26), 0, f.aim);
+    }
   });
 }
 
-function throwHeld(power, sideways = 0) {
+// Remember which way the phone faced a moment ago, so a sideways flick still throws where you were looking.
+const aimHist = [];
+function recordAim() {
+  const f = new THREE.Vector3(); camera.getWorldDirection(f);
+  if (Math.hypot(f.x, f.z) < 0.05) return;
+  aimHist.push({ t: performance.now(), x: f.x, z: f.z });
+  while (aimHist.length > 90) aimHist.shift();
+}
+function aimHeading(t) {
+  let best = null;
+  for (const h of aimHist) if (h.t <= t) best = h;
+  return best ? { x: best.x, z: best.z } : null;
+}
+function throwHeld(power, sideways = 0, aim = null) {
   if (!inHand) return;
   const obj = inHand; inHand = null; lastThrowAt = performance.now();
   const wp = new THREE.Vector3(); obj.getWorldPosition(wp);
   camera.remove(obj); scene.add(obj); obj.position.copy(wp);
   const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd);
-  const flat = new THREE.Vector3(fwd.x, 0, fwd.z).normalize();
+  const flat = aim && mode === 'cam' ? new THREE.Vector3(aim.x, 0, aim.z).normalize() : new THREE.Vector3(fwd.x, 0, fwd.z).normalize();
   const right = new THREE.Vector3(-flat.z, 0, flat.x);
   const dir = flat.clone().addScaledVector(right, THREE.MathUtils.clamp(sideways, -0.8, 0.8) * 0.6).normalize();
   // Gentler throws in the cartoon room so the ball stays on screen.
-  const sp = mode === 'play' ? 0.8 + power * 1.2 : 0.4 + power * 3.2;
-  obj.vel = dir.multiplyScalar(sp).add(new THREE.Vector3(0, mode === 'play' ? 1 + power * 0.6 : 0.8 + power * 1.6, 0));
+  // In your room a hard flick sends it far — down the hall.
+  const sp = mode === 'play' ? 0.8 + power * 1.2 : 0.5 + power * 7.3;
+  obj.vel = dir.multiplyScalar(sp).add(new THREE.Vector3(0, mode === 'play' ? 1 + power * 0.6 : 1 + power * 1.8, 0));
   if (obj.kind === 'ball') setTimeout(() => tutDone('ball'), 1500);
   obj.spin = new THREE.Vector3(Math.random() * 10, Math.random() * 10, 0);
   obj.landed = false;
@@ -1120,16 +1143,20 @@ function stepThrown(dt) {
     if (o.spin) { o.rotation.x += o.spin.x * dt; o.rotation.y += o.spin.y * dt; }
     if (o.position.y < floorY + o.r) {
       o.position.y = floorY + o.r;
-      const bounce = o.kind === 'treat' ? 0.2 : 0.55;
-      if (Math.abs(o.vel.y) > 0.6) sfx.bounce(Math.min(1, Math.abs(o.vel.y) / 4));
-      o.vel.y = -o.vel.y * bounce; o.vel.x *= 0.78; o.vel.z *= 0.78;
+      const bounce = o.kind === 'treat' ? 0.2 : 0.45;
+      const impact = Math.abs(o.vel.y) > 0.6;
+      if (impact) sfx.bounce(Math.min(1, Math.abs(o.vel.y) / 4));
+      o.vel.y = -o.vel.y * bounce;
+      // A real bounce loses some speed; a rolling ball just slows down gently.
+      const keep = impact ? 0.65 : o.kind === 'treat' ? Math.max(0, 1 - 6 * dt) : Math.max(0, 1 - 2.2 * dt);
+      o.vel.x *= keep; o.vel.z *= keep;
       if (o.spin) o.spin.multiplyScalar(0.6);
       if (Math.abs(o.vel.y) < 0.2) o.vel.y = 0;
       if (o.kind === 'treat') { o.rotation.set(0, o.rotation.y, 0); o.spin = null; }
     }
     // Bounce off real walls and cabinets the camera has seen.
     if (mode === 'cam' && walk && o.position.y < 1.3) {
-      const dc = Math.hypot(o.position.x, o.position.z), far = dc > 3.4;
+      const dc = Math.hypot(o.position.x, o.position.z), far = dc > 7;
       if (far || walk.blocked(o.position.x, o.position.z)) {
         o.position.addScaledVector(o.vel, -dt);
         const n = far ? [-o.position.x / dc, -o.position.z / dc] : walk.normal(o.position.x, o.position.z);
@@ -1851,7 +1878,7 @@ function tick(time, frame) {
     controls.update();
   } else {
     if (mode === 'play') controls.update();
-    if (mode === 'cam') { applyOrientation(); if (walk && pet) { walk.update(dt, walk.s[walk.idx(pet.position.x, pet.position.z)] > 0.3 ? [pet.position] : []); unstick(dt); } }
+    if (mode === 'cam') { applyOrientation(); recordAim(); if (walk && pet) { walk.update(dt, walk.s[walk.idx(pet.position.x, pet.position.z)] > 0.3 ? [pet.position] : []); unstick(dt); } }
     if (pet && pet.parent) {
       if (pet.popIn !== undefined && pet.popIn < 1) { pet.popIn = Math.min(1, pet.popIn + dt * 3); const s = 1 - Math.pow(1 - pet.popIn, 3) * 1; pet.scale.setScalar(Math.max(0.01, s * (1 + Math.sin(pet.popIn * Math.PI) * 0.15))); }
       pet.update(dt, camPos);
@@ -1924,7 +1951,7 @@ function frameCamera(which) {
 
 addEventListener('error', (e) => { try { toast('Oops: ' + (e.message || 'something broke') + ' — say "come" to reset'); } catch {} });
 addEventListener('unhandledrejection', (e) => { console.warn(e.reason); });
-window.__pip = { get pet() { return pet; }, THREE };  // handy for testing
+window.__pip = { get pet() { return pet; }, get thrown() { return thrown; }, THREE };  // handy for testing
 /* ---------------- boot ---------------- */
 buildCreator();
 frameCamera('create');
