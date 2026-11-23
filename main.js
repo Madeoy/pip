@@ -27,6 +27,7 @@ const sfx = {
   munch: () => { for (let i = 0; i < 4; i++) tone(220 + Math.random() * 80, 120, 0.06, 'square', 0.05, i * 0.13); },
   whoosh: () => tone(300, 1200, 0.18, 'sawtooth', 0.04),
   squeak: () => tone(1500, 2200, 0.09, 'triangle', 0.1),
+  joy: () => { const b = 850 + Math.random() * 250; tone(b, b * 1.7, 0.09, 'sine', 0.16); tone(b * 1.2, b * 2, 0.08, 'sine', 0.13, 0.1); if (Math.random() < 0.5) tone(b * 1.5, b * 2.4, 0.1, 'triangle', 0.1, 0.2); },
   bark: () => { tone(620, 380, 0.11, 'square', 0.07); tone(680, 400, 0.11, 'square', 0.07, 0.18); },
   sing: () => { [660, 740, 880, 740, 990, 880].forEach((f, i) => tone(f, f * 1.02, 0.2, 'sine', 0.12, i * 0.22)); },
   purr: () => { for (let i = 0; i < 6; i++) tone(90, 80, 0.09, 'sawtooth', 0.04, i * 0.1); },
@@ -343,8 +344,8 @@ async function startCam() {
   camera.position.set(0, 1.15, 0); camera.quaternion.identity();
   // A ring of floor around you the pet can roam and hide on.
   floorMap.length = 0;
-  for (let i = 0; i < 60; i++) { const a = Math.random() * Math.PI * 2, r = 0.7 + Math.random() * 1.6; floorMap.push(new THREE.Vector3(Math.sin(a) * r, 0, -Math.cos(a) * r)); }
-  pet.position.set(0, 0, -1.0); pet.rotation.y = 0; pet.scale.setScalar(0.01); pet.popIn = 0;
+  for (let i = 0; i < 60; i++) { const a = Math.random() * Math.PI * 2, r = 0.6 + Math.random() * 0.75; floorMap.push(new THREE.Vector3(Math.sin(a) * r, 0, -Math.cos(a) * r)); }
+  pet.position.set(0, 0, -0.8); pet.rotation.y = 0; pet.scale.setScalar(0.01); pet.popIn = 0;
   $('create').hidden = true; $('hud').hidden = false; setNames();
   addEventListener('deviceorientation', onOrient);
   armKnock(); setTimeout(greet, 300);
@@ -358,9 +359,11 @@ function applyOrientation() {
   const screenAngle = (screen.orientation?.angle || 0) * d2r;
   _euler.set(orient.beta * d2r, (orient.alpha - alphaOffset) * d2r, -orient.gamma * d2r, 'YXZ');
   const q = new THREE.Quaternion().setFromEuler(_euler).multiply(_q1).multiply(_q0.setFromAxisAngle(_z, -screenAngle));
-  camera.quaternion.slerp(q, 0.5);
+  // Heavier smoothing keeps the pet from swimming around.
+  if (camera.quaternion.angleTo(q) > 0.004) camera.quaternion.slerp(q, 0.22);
 }
 function stopCam() {
+  zoom = 1; for (const el of [$('camfeed'), canvas]) el.style.transform = '';
   removeEventListener('deviceorientation', onOrient); orient = null;
   camStream?.getTracks().forEach((t) => t.stop()); camStream = null; $('camfeed').hidden = true;
   camera.fov = 55; camera.updateProjectionMatrix();
@@ -515,18 +518,27 @@ function wantPats() {
 }
 function pat() {
   if (!pet) return;
-  pats++; buzz(25); sfx.purr();
+  pats++; buzz(25); sfx.joy(); lastPatAt = performance.now();
   hearts.burst(pet.localToWorld(new THREE.Vector3(0, 0.2, 0)), 2);
   pet.state = 'hop'; pet.jump = 0.4;
   needs.fun = clamp01(needs.fun + 6);
   if (pats >= 3) {
-    wantsPat = 0; pets_given++;
+    wantsPat = 0; pets_given++; pats = 0;
     setTimeout(() => { pet.happy(3); emote('♥ ♥ ♥', '#ff7eb3'); buzz([30, 40, 30]); }, 250);
     praise();
   } else emote(pats === 1 ? '♥' : '♥♥', '#ff7eb3');
 }
-let pets_given = 0;
+let pets_given = 0, lastPatAt = 0;
+function petIsClose() {
+  if (!pet?.parent || !pet.visible) return false;
+  const p = pet.localToWorld(new THREE.Vector3(0, 0.08, 0)).project(camera);
+  const inView = p.z < 1 && Math.abs(p.x) < 0.75 && Math.abs(p.y) < 0.8;
+  if (mode === 'ar') return inView && hideDistance() < 1.3;
+  if (mode === 'cam') return inView;
+  return inView;
+}
 function maybeCuddle(dt) {
+  if (pats && !wantsPat && performance.now() - lastPatAt > 4000) pats = 0;
   if (wantsPat && performance.now() > wantsPat) { wantsPat = 0; emote('aww…'); }
   if (wantsPat || hideGame || stayMode || inHand || sick || pet.state !== 'idle' || pet.target) return;
   nextCuddle -= dt; if (nextCuddle > 0) return;
@@ -562,6 +574,27 @@ function puppyQuirks(dt) {
   else if (r < 0.8 && onTable()) { const f = nearest(floorMap, pet.position, 2); if (f) travel(f.clone().setY(floorY), false); }
 }
 
+/* ---------------- zoom in on the pet when you look down at it ---------------- */
+let zoom = 1, zoomOrigin = { x: innerWidth / 2, y: innerHeight / 2 };
+function updateZoom(dt) {
+  let want = 1;
+  if (mode === 'cam' && pet?.parent && pet.visible) {
+    const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd);
+    const p = pet.localToWorld(new THREE.Vector3(0, 0.08, 0)).project(camera);
+    const centered = p.z < 1 && Math.abs(p.x) < 0.4 && Math.abs(p.y) < 0.45;
+    if (centered && fwd.y < -0.4) {
+      want = 1.55;
+      zoomOrigin.x += (((p.x + 1) / 2) * innerWidth - zoomOrigin.x) * Math.min(1, dt * 3);
+      zoomOrigin.y += (((1 - p.y) / 2) * innerHeight - zoomOrigin.y) * Math.min(1, dt * 3);
+    }
+  }
+  zoom += (want - zoom) * Math.min(1, dt * 2.5);
+  const t = Math.abs(zoom - 1) < 0.003 ? '' : `scale(${zoom.toFixed(3)})`;
+  for (const el of [$('camfeed'), canvas]) { el.style.transformOrigin = `${zoomOrigin.x}px ${zoomOrigin.y}px`; el.style.transform = t; }
+}
+// Undo the zoom for tap positions.
+function unzoom(x, y) { return { x: zoomOrigin.x + (x - zoomOrigin.x) / zoom, y: zoomOrigin.y + (y - zoomOrigin.y) / zoom }; }
+
 /* ---------------- tapping the scene (preview) ---------------- */
 let downAt = null;
 canvas.addEventListener('pointerdown', (e) => { downAt = { x: e.clientX, y: e.clientY, t: performance.now() }; });
@@ -570,7 +603,8 @@ canvas.addEventListener('pointerup', (e) => {
   const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
   if (moved < 8 && performance.now() - downAt.t < 400) {
     const ray = new THREE.Raycaster();
-    ray.setFromCamera(new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1), camera);
+    const u = unzoom(e.clientX, e.clientY);
+    ray.setFromCamera(new THREE.Vector2((u.x / innerWidth) * 2 - 1, -(u.y / innerHeight) * 2 + 1), camera);
     handleTap(ray);
   }
   downAt = null;
@@ -580,7 +614,8 @@ function handleTap(ray) {
   if (!pet) return;
   if (placingBed) {
     const hp = new THREE.Vector3();
-    if (ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -floorY), hp)) placeBed(hp);
+    if (ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -floorY), hp)) placeBed(mode === 'cam' ? clampToPlay(hp) : hp);
+    else if (mode === 'cam') placeBed(frontOfYou(0.9));
     return;
   }
   if (ray.intersectObject(pet, true).length) {
@@ -594,7 +629,7 @@ function handleTap(ray) {
   const hit = new THREE.Vector3();
   if (ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -floorY), hit)) {
     if (hideGame) return;
-    travel(hit);
+    travel(mode === 'cam' ? clampToPlay(hit) : hit);
   }
 }
 
@@ -835,7 +870,7 @@ function removeThrown(o) { const i = thrown.indexOf(o); if (i >= 0) thrown.splic
 function clearThrown() { for (const o of [...thrown]) removeThrown(o); if (inHand) { camera.remove(inHand); inHand = null; } }
 
 function frontOfYou(dist = 0.4) {
-  if (mode === 'cam') dist = Math.max(dist, 0.9);
+  if (mode === 'cam') dist = Math.min(Math.max(dist, 0.7), 1.2);
   const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
   const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
   return new THREE.Vector3(cp.x + fwd.x * dist, floorY, cp.z + fwd.z * dist);
@@ -944,7 +979,7 @@ function runAway() {
   travel(p, true, () => { emote('hehe'); setTimeout(() => { if (pet.state === 'idle' && !hideGame) travel(frontOfYou(0.4)); }, 2500); });
 }
 function clampToPlay(p) {
-  const lim = mode === 'play' ? 1.5 : mode === 'cam' ? 2.4 : Infinity;
+  const lim = mode === 'play' ? 1.5 : mode === 'cam' ? 1.35 : Infinity;
   { const d = Math.hypot(p.x, p.z); if (d > lim) { p.x *= lim / d; p.z *= lim / d; } }
   p.y = floorY; return p;
 }
@@ -1030,13 +1065,14 @@ function armKnock() {
   const DME = window.DeviceMotionEvent;
   if (DME && typeof DME.requestPermission === 'function') DME.requestPermission().catch(() => {});
   addEventListener('devicemotion', (e) => {
-    if ((!hideGame && !wantsPat && pet?.state !== 'sleep') || inHand) return;
+    if (inHand || !pet?.parent) return;
     const a = e.acceleration; if (!a) return;
     const mag = Math.hypot(a.x || 0, a.y || 0, a.z || 0);
     if (mag < 7 || mag > 30) return;   // a knock: sharp but small (a flick is bigger)
     const now = performance.now();
     if (now - lastKnock < 90) return;  // same jolt
-    if (wantsPat) { if (now - lastPat > 220) { lastPat = now; pat(); } return; }
+    if (wantsPat || (!hideGame && pet.state !== 'sleep' && petIsClose())) { if (now - lastPat > 220) { lastPat = now; pat(); } return; }
+    if (!hideGame && pet.state !== 'sleep') return;
     if (now - lastKnock < 550) { lastKnock = 0; knockKnock(); } else lastKnock = now;
   });
 }
@@ -1203,7 +1239,7 @@ function updateFollow(dt) {
   nextZoomies -= 0.4;
   if (nextZoomies < 0 && needs.energy > 40 && !sick) {
     nextZoomies = 20 + Math.random() * 25;
-    const ahead = clampToPlay(frontOfYou(mode === 'cam' ? 2.2 : 1.8).add(new THREE.Vector3((Math.random() - 0.5) * 0.8, 0, 0)));
+    const ahead = clampToPlay(frontOfYou(mode === 'cam' ? 1.2 : 1.8).add(new THREE.Vector3((Math.random() - 0.5) * 0.8, 0, 0)));
     emote('zoom!', '#ffd25e'); sfx.chirp(1.6);
     travel(ahead, true, () => { pet.hop(); emote('come get me!'); });
     zoomUntil = now + 5000;
@@ -1318,6 +1354,7 @@ renderer.setAnimationLoop((time, frame) => {
       if (pet.state !== 'leap') shadowCatcher.position.y = pet.position.y + 0.001;
     }
     updatePops(dt);
+    updateZoom(dt);
     if (bed && bed.pop !== undefined && bed.pop < 1) { bed.pop = Math.min(1, bed.pop + dt * 4); bed.scale.setScalar(Math.max(0.01, bed.pop)); }
     if (bowl && bowl.pop !== undefined && bowl.pop < 1) { bowl.pop = Math.min(1, bowl.pop + dt * 4); bowl.scale.setScalar(Math.max(0.01, bowl.pop)); }
     // Self-started mischief every so often.

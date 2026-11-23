@@ -90,12 +90,15 @@
     #create .title { top: calc(8px + var(--safe-t)); }
     #create .title h1 { font-size: 30px; }
     /* slim dock of small icons */
-    .dock { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(10px + var(--safe-b)); display: flex; align-items: center; gap: 3px; padding: 5px 6px;
-            border-radius: 999px; background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); max-width: calc(100% - 12px); }
-    .ib { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-size: 18px; background: rgba(255,255,255,.08); flex: none; }
-    .ib.on { background: #fff; }
-    .dock .mic { width: 46px; height: 46px; font-size: 22px !important; box-shadow: 0 0 0 3px rgba(255,255,255,.85); flex: none; }
-    .heard { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(66px + var(--safe-b)); margin: 0; padding: 4px 12px; border-radius: 999px; background: rgba(0,0,0,.35); font-size: 13px !important; white-space: nowrap; max-width: calc(100% - 24px); overflow: hidden; text-overflow: ellipsis; }
+    .dock { position: absolute; left: 8px; right: 8px; bottom: calc(8px + var(--safe-b)); display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+            border-radius: 28px; background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+    .dock-scroll { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding: 2px 4px 2px 0; mask-image: linear-gradient(90deg, #000 85%, transparent); -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); }
+    .dock-scroll::-webkit-scrollbar { display: none; }
+    .ib { flex: none; width: 62px; height: 62px; border-radius: 18px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; background: rgba(255,255,255,.1); scroll-snap-align: start; }
+    .ib span { font-size: 28px; line-height: 1; }
+    .ib small { font-size: 12px; font-weight: 700; color: var(--ink); }
+    .dock .mic { width: 66px; height: 66px; font-size: 30px !important; box-shadow: 0 0 0 3px rgba(255,255,255,.85); flex: none; }
+    .heard { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(92px + var(--safe-b)); margin: 0; padding: 4px 12px; border-radius: 999px; background: rgba(0,0,0,.35); font-size: 13px !important; white-space: nowrap; max-width: calc(100% - 24px); overflow: hidden; text-overflow: ellipsis; }
     #hud .top { gap: 6px; }
     #hud .top .pill { padding: 5px 10px; font-size: 14px; }
     .meters { gap: 5px !important; }
@@ -103,7 +106,7 @@
     .meters span { font-size: 12px; }
     .status { top: calc(52px + var(--safe-t)) !important; font-size: 13px !important; padding: 5px 12px !important; }
     .roomchip { top: calc(52px + var(--safe-t)) !important; font-size: 12px !important; left: 12px; right: auto !important; }
-    #toast { bottom: calc(100px + var(--safe-b)) !important; font-size: 15px !important; }
+    #toast { bottom: calc(126px + var(--safe-b)) !important; font-size: 15px !important; }
     .sheet { position: absolute; inset: 0; display: flex; align-items: flex-end; justify-content: center; background: rgba(6,4,20,.5); }
     .sheet-card { width: min(100%, 440px); max-height: 70vh; overflow: auto; margin: 0 8px calc(8px + var(--safe-b)); padding: 14px 16px; border-radius: 24px; background: #1d1545; border: 1px solid var(--line); }
     .sheet-card h3 { margin: 0 0 8px; font-size: 20px; }
@@ -154,15 +157,17 @@
       <div id="arrow" hidden><i></i></div>
       <p class="heard" id="heard">Tap 🎤 and talk to <b class="pn">Pip</b></p>
       <div class="dock" id="dock">
-        <button class="ib" id="ballBtn" aria-label="Ball">🎾</button>
-        <button class="ib" id="treatBtn" aria-label="Treat">🦴</button>
-        <button class="ib" id="waterBtn" aria-label="Food and water">🍽️</button>
-        <button class="ib" id="bedBtn" aria-label="Place bed">🛏️</button>
         <button class="mic" id="micBtn" aria-label="Talk">🎤</button>
-        <button class="ib" id="hideBtn" aria-label="Hide and seek">🙈</button>
-        <button class="ib" id="walkBtn" aria-label="Walk together">👣</button>
-        <button class="ib" id="tricksBtn" aria-label="Tricks">📋</button>
-        <button class="ib" id="voiceOnlyBtn" aria-label="Hide buttons">⌄</button>
+        <div class="dock-scroll">
+          <button class="ib" id="ballBtn"><span>🎾</span><small>Ball</small></button>
+          <button class="ib" id="treatBtn"><span>🦴</span><small>Treat</small></button>
+          <button class="ib" id="waterBtn"><span>🍽️</span><small>Food</small></button>
+          <button class="ib" id="bedBtn"><span>🛏️</span><small>Bed</small></button>
+          <button class="ib" id="hideBtn"><span>🙈</span><small>Hide</small></button>
+          <button class="ib" id="walkBtn"><span>👣</span><small>Walk</small></button>
+          <button class="ib" id="tricksBtn"><span>📋</span><small>Tricks</small></button>
+          <button class="ib" id="voiceOnlyBtn"><span>🙌</span><small>Hide UI</small></button>
+        </div>
       </div>
       <div class="sheet" id="tricksSheet" hidden>
         <div class="sheet-card">
