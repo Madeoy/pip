@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=26';
-import { HandSeer } from './hand.js?v=26';
-import { WalkMap } from './walk.js?v=26';
+import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=27';
+import { HandSeer } from './hand.js?v=27';
+import { WalkMap } from './walk.js?v=27';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'pip-pet-v1';
@@ -25,7 +25,7 @@ function tone(f0, f1, dur, type = 'sine', vol = 0.18, delay = 0) {
   } catch {}
 }
 const sfx = {
-  chirp: (m = 1) => tone(700 * m, 1250 * m, 0.13),
+  chirp: () => {}, // chirps turned off (user request 2026-11-23); was tone(700*m, 1250*m, 0.13)
   happy: () => { tone(800, 1300, 0.1); tone(1000, 1600, 0.1, 'sine', 0.18, 0.12); tone(1200, 2000, 0.14, 'sine', 0.18, 0.24); },
   confused: () => { tone(900, 600, 0.18, 'triangle'); tone(600, 900, 0.18, 'triangle', 0.15, 0.2); },
   nope: () => { tone(500, 300, 0.12, 'square', 0.06); tone(500, 300, 0.12, 'square', 0.06, 0.15); },
