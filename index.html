@@ -77,7 +77,9 @@
     .tabs { display: flex; gap: 4px; margin-bottom: 6px; }
     .tabs button { flex: 1; padding: 5px 0; border-radius: 10px; font-size: 13px; font-weight: 600; color: var(--ink2); background: rgba(255,255,255,.06); }
     .tabs button.on { background: #fff; color: #2a1b5e; }
-    .tabbody { height: 128px; overflow-y: auto; overflow-x: hidden; }
+    .slide { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); padding: 2px 16px; border-radius: 999px; background: #fff; color: #2a1b5e; font-weight: 800; font-size: 15px; box-shadow: 0 4px 14px rgba(0,0,0,.3); }
+    .creator.mini .tabs, .creator.mini .tabbody, .creator.mini .note, .creator.mini #goPlay { display: none !important; }
+    .tabbody { height: 116px; overflow-y: auto; overflow-x: hidden; }
     .grid { display: flex; flex-wrap: wrap; gap: 6px; }
     .animal { width: 44px; height: 44px; border-radius: 12px; font-size: 26px; background: rgba(255,255,255,.07); border: 2px solid transparent; }
     .animal.on { border-color: #fff; background: rgba(255,255,255,.18); }
@@ -127,6 +129,7 @@
     <div id="create">
       <div class="title"><h1>Make your pet</h1></div>
       <div class="panel creator">
+        <button class="slide" id="slideBtn" aria-label="Slide builder down">⌄</button>
         <div class="row"><input class="name" id="name" maxlength="14" value="Pip" aria-label="Name" /><button class="dice" id="randomBtn" aria-label="Surprise me">🎲</button></div>
         <div class="tabs" id="tabs">
           <button data-tab="pets">My pets</button><button data-tab="animal" class="on">Animal</button><button data-tab="colors">Colors</button><button data-tab="parts">Parts</button><button data-tab="style">Style</button>
@@ -178,6 +181,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="main.js"></script>
+  <script type="module" src="main.js?v=9"></script>
 </body>
 </html>

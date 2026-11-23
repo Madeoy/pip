@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js';
+import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=9';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'pip-pet-v1';
@@ -200,6 +200,12 @@ let tab = 'animal';
 
 function buildCreator() {
   for (const b of document.querySelectorAll('#tabs button')) b.onclick = () => { tab = b.dataset.tab; renderTab(); };
+  // Slide the builder down to see your whole pet, and back up to edit.
+  $('slideBtn').onclick = () => {
+    const c = document.querySelector('.creator'); c.classList.toggle('mini');
+    $('slideBtn').textContent = c.classList.contains('mini') ? '⌃ Edit' : '⌄';
+    frameCamera('create');
+  };
   $('name').value = look.name;
   $('name').oninput = () => { look.name = $('name').value.trim() || 'Pip'; persist(); };
   $('randomBtn').onclick = () => {
@@ -1475,11 +1481,11 @@ function frameCamera(which) {
   if (which === 'create') {
     const H = innerHeight, W = innerWidth;
     const top = (document.querySelector('#create .title h1')?.getBoundingClientRect().bottom || 50) + 6;
-    const bottom = (document.querySelector('.creator')?.getBoundingClientRect().top || H * 0.6) - 6;
+    const bottom = (document.querySelector('.creator')?.getBoundingClientRect().top || H * 0.6) - 18;
     const freeH = Math.max(120, bottom - top), yc = top + freeH / 2;
     const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
     // The pet with ears, hats and tails is about 0.34m tall and 0.36m wide; leave a margin.
-    const dh = 0.36 * H / (freeH * 2 * tanHalf);
+    const dh = 0.44 * H / (freeH * 2 * tanHalf);
     const dw = 0.4 / (2 * tanHalf * (W / H));
     const d = Math.max(dh, dw, 0.45);
     camera.position.set(0, 0.17, d); controls.target.set(0, 0.11, 0);
