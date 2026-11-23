@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=17';
-import { HandSeer } from './hand.js?v=17';
-import { WalkMap } from './walk.js?v=17';
+import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=18';
+import { HandSeer } from './hand.js?v=18';
+import { WalkMap } from './walk.js?v=18';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'pip-pet-v1';
@@ -547,6 +547,34 @@ function unstick(dt) {
   if (stuckT > 0.8) { stuckT = 0; const p = walk.nearestFree(pet.position); if (p !== pet.position) pet.goTo(p, true); }
   for (const o of thrown) if (!o.held && o.landed && walk.blocked(o.position.x, o.position.z)) { const p = walk.nearestFree(o.position); o.position.x = p.x; o.position.z = p.z; }
 }
+let placingUp = false, perch = null;
+// Where on the furniture did you tap? Follow the tap ray until it passes over
+// something that isn't floor; its height there is the furniture top.
+function surfaceFromTap(ray) {
+  const o = ray.ray.origin, d = ray.ray.direction;
+  if (mode !== 'cam') { const hits = tableMap.length ? nearest(tableMap, pet.position, 3) : null; return hits; }
+  for (let t = 0.3; t < 4; t += 0.03) {
+    const x = o.x + d.x * t, y = o.y + d.y * t, z = o.z + d.z * t;
+    if (y < 0.12) break;
+    if (walk && walk.blocked(x, z) && y < 1.2) return new THREE.Vector3(x + d.x * 0.08, y, z + d.z * 0.08);
+  }
+  // No floor map yet: guess a seat-height surface where you tapped.
+  if (d.y < -0.05) { const t = (o.y - 0.45) / -d.y; if (t > 0.3 && t < 3) return new THREE.Vector3(o.x + d.x * t, 0.45, o.z + d.z * t); }
+  return null;
+}
+function hopUp() {
+  if (!pet?.parent) return;
+  if (petInHand) { hopOut(); setTimeout(hopUp, 900); return; }
+  if (!perch) { placingUp = true; placingBowls = null; toast('Tap the top of a table, couch or chair 🛋️'); return; }
+  stayMode = false; emote('up!');
+  travel(perch, false, () => { pet.hop(); success('up'); });
+}
+function getDown() {
+  if (!onTable()) { emote('?'); return; }
+  const f = nearest(floorMap, pet.position, 2) || new THREE.Vector3(pet.position.x + 0.3, floorY, pet.position.z + 0.3);
+  travel(f.clone().setY(floorY), false, () => pet.hop());
+}
+$('upBtn').onclick = () => { if (onTable()) getDown(); else { perch = null; hopUp(); } };
 function travel(point, run = false, cb = null) {
   const dy = point.y - pet.position.y;
   if (Math.abs(dy) < 0.1) { pet.goTo(point, run, cb); return; }
@@ -711,6 +739,14 @@ canvas.addEventListener('pointerup', (e) => {
 
 function handleTap(ray) {
   if (!pet) return;
+  if (placingBowls) {
+    const which = placingBowls; placingBowls = null;
+    const hp = new THREE.Vector3();
+    let p = ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -floorY), hp) ? hp : frontOfYou(0.6);
+    if (mode === 'cam') { p = clampToPlay(p); if (walk) p = walk.nearestFree(p); }
+    placeBowls(which, p); return;
+  }
+  if (placingUp) { placingUp = false; const s = surfaceFromTap(ray); if (!s) { toast('Hmm, tap right on the top of the table, couch or chair'); return; } perch = s; hopUp(); return; }
   if (placingBed) {
     const hp = new THREE.Vector3();
     if (ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -floorY), hp)) placeBed(mode === 'cam' ? clampToPlay(hp) : hp);
@@ -751,14 +787,35 @@ function holdItem(kind) {
 }
 $('ballBtn').onclick = () => holdItem('ball');
 $('treatBtn').onclick = () => holdItem('treat');
-$('waterBtn').onclick = () => placeBowls('both');
+let bowlHold = null, bowlHeld = false;
+$('waterBtn').addEventListener('pointerdown', () => { bowlHeld = false; bowlHold = setTimeout(() => { bowlHeld = true; removeBowls(); }, 800); });
+for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) $('waterBtn').addEventListener(ev, () => clearTimeout(bowlHold));
+$('waterBtn').onclick = () => { if (bowlHeld) return; feed('both'); };
+let placingBowls = null;
+// Bowls stay where you put them. Ask again and they get refilled.
+function feed(which) {
+  if (!pet?.parent) return;
+  const have = which === 'food' ? foodBowl?.parent : which === 'water' ? bowl?.parent : (foodBowl?.parent || bowl?.parent);
+  if (!have) { placingBowls = which; placingUp = false; toast(`Tap the floor where ${which === 'water' ? 'the water bowl' : which === 'food' ? 'the food bowl' : 'the food & water bowls'} should go`); return; }
+  if (which !== 'water' && foodBowl?.parent) { foodBowl.food.visible = true; foodBowl.food.scale.setScalar(1); }
+  if (which !== 'food' && bowl?.parent) bowl.water.scale.setScalar(1);
+  sfx.chirp(0.8); setTimeout(() => tutDone('food'), 2500);
+  if (pet.state === 'sleep') { emote('z z z'); return; }
+  if (petInHand) { hopOut(); setTimeout(() => goEatOrDrink(which), 900); return; }
+  setTimeout(() => goEatOrDrink(which), 400);
+}
+function removeBowls() {
+  let any = false;
+  for (const o of [foodBowl, bowl]) if (o?.parent) { o.parent.remove(o); any = true; }
+  toast(any ? 'Bowls put away 🧺' : 'No bowls out'); sfx.chirp(0.7);
+}
 
 let foodBowl = null;
 function placeWater() { placeBowls('water'); }
-function placeBowls(which = 'both') {
+function placeBowls(which = 'both', at = null) {
   if (!pet?.parent) return;
   setTimeout(() => tutDone('food'), 2500);
-  const front = frontOfYou(0.45);
+  const front = at || frontOfYou(0.45);
   const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
   const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
   const side = new THREE.Vector3(-fwd.z, 0, fwd.x);
@@ -1174,15 +1231,10 @@ function doTrick(cmd, forced = false) {
     case 'down': pet.lieDown(); break;
     case 'kiss': emote('♥'); travel(frontOfYou(0.3), true, () => { pet.happy(2); hearts.burst(pet.localToWorld(new THREE.Vector3(0, 0.22, 0)), 8); sfx.happy(); success('kiss'); wantPats(); }); return;
     case 'up': {
-      const t = nearest(tableMap, pet.position, 2.5);
-      if (!t) { emote('where?'); toast('Point your phone at a table top so it can see it'); return; }
-      emote('up!'); travel(t, false, () => { pet.hop(); success('up'); }); return;
+      if (mode === 'ar' && !perch) { const t = nearest(tableMap, pet.position, 2.5); if (t) perch = t; }
+      hopUp(); return;
     }
-    case 'off': {
-      if (!onTable()) { emote('?'); return; }
-      const f = nearest(floorMap, pet.position, 2) || new THREE.Vector3(pet.position.x + 0.3, floorY, pet.position.z + 0.3);
-      travel(f.clone().setY(floorY), false, () => pet.hop()); return;
-    }
+    case 'off': getDown(); return;
     default:
       if (Pet.TRICKS[cmd]) {
         pet.trickNow(cmd);
@@ -1329,7 +1381,8 @@ function checkFound() {
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, listening = false;
 const COMMANDS = [
-  [/\b(hop in|hop on|climb in|climb on|jump in|up you go|get in)\b/, 'hopin'],
+  [/\b(hop up|climb up|jump up|get up|up there|up on|on the (table|couch|sofa|chair|seat)|onto the)\b/, 'up'],
+  [/\b(hop in|hop on (my )?hand|climb in|climb on (my )?hand|jump in|in my hand|up you go|get in)\b/, 'hopin'],
   [/\b(hop out|hop off|hop down|climb out|climb off|climb down|get out|get off|jump out|jump down|all done|i'm done|im done|put you down|down you go|out you go)\b/, 'hopout'],
   [/\b(show (the )?(buttons|controls)|buttons)\b/, 'buttons'],
   [/\b(play catch|catch)\b/, 'fetch'],
@@ -1362,6 +1415,7 @@ const COMMANDS = [
   [/\b(jump|hop)\b/, 'hop'],
   [/\b(fetch|ball|throw)\b/, 'fetch'],
   [/\b(clean up|clean|tidy|put (your )?toys away|toys)\b/, 'cleanup'],
+  [/\b(remove|put away|take away|pick up|delete|clear)\b.*\b(bowls?|dish(es)?|food|water)\b/, 'nobowls'],
   [/\b(food|dinner|breakfast|lunch|supper|hungry|eat|meal|veggies|vegetables)\b/, 'food'],
   [/\b(treat|bone|snack|chew|cookie)\b/, 'treat'],
   [/\b(water|drink|thirsty)\b/, 'water'],
@@ -1439,9 +1493,10 @@ function onSpeech(text) {
     }
     case 'treat': if (sick) { emote('no more treats…', '#b7d98a'); return; } (voiceOnly || follow) ? autoThrow('treat') : holdItem('treat'); emote('!!'); return;
     case 'hopin': hopIn(); return;
-    case 'hopout': hopOut(); return;
-    case 'water': placeBowls('water'); return;
-    case 'food': placeBowls('food'); return;
+    case 'hopout': if (!petInHand && onTable()) { getDown(); return; } hopOut(); return;
+    case 'water': feed('water'); return;
+    case 'food': feed('food'); return;
+    case 'nobowls': removeBowls(); return;
     case 'cleanup': cleanUp(); return;
     case 'follow': setWalk(true); return;
     case 'sleep': if (pet.state !== 'sleep') goToBedAndNap(); return;
