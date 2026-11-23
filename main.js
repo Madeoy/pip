@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=16';
-import { HandSeer } from './hand.js?v=16';
+import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=17';
+import { HandSeer } from './hand.js?v=17';
+import { WalkMap } from './walk.js?v=17';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'pip-pet-v1';
@@ -413,6 +414,7 @@ async function startCam() {
   const v = $('camfeed'); v.srcObject = camStream; v.hidden = false; await v.play().catch(() => {});
   camera.clearViewOffset();
   mode = 'cam'; placed = true; floorY = 0; alphaOffset = null;
+  if (!walk) walk = new WalkMap(camera, v); walk.reset();
   room.visible = false; shadowCatcher.visible = true; shadowCatcher.position.y = 0.001; controls.enabled = false;
   renderer.setClearColor('#000000', 0);
   camera.fov = 62; camera.updateProjectionMatrix();
@@ -527,6 +529,24 @@ function learnTable(p) {
   if (tableMap.length === 4) toast(`${look.name} spotted a table! Say "jump up!" 🪑`);
 }
 // Go anywhere, jumping up or down when the height changes.
+/* ---------------- real-room obstacles (camera mode) ---------------- */
+let walk = null, stuckT = 0;
+{ const raw = Pet.prototype.goTo;
+  Pet.prototype.goTo = function (point, run = false, cb = null) {
+    if (mode !== 'cam' || !walk || this.position.y - floorY > 0.2) return raw.call(this, point, run, cb);
+    const goal = walk.nearestFree(new THREE.Vector3(point.x, point.y, point.z));
+    const path = walk.plan(this.position, goal) || [goal];
+    const step = (i) => raw.call(this, path[i], run, i === path.length - 1 ? cb : () => step(i + 1));
+    step(0);
+  };
+}
+// If the pet ends up "inside" a wall or cabinet, walk back out onto the floor.
+function unstick(dt) {
+  if (!pet?.parent || pet.position.y - floorY > 0.2 || ['leap', 'hiding', 'sleep'].includes(pet.state)) { stuckT = 0; return; }
+  stuckT = walk.blocked(pet.position.x, pet.position.z) ? stuckT + dt : 0;
+  if (stuckT > 0.8) { stuckT = 0; const p = walk.nearestFree(pet.position); if (p !== pet.position) pet.goTo(p, true); }
+  for (const o of thrown) if (!o.held && o.landed && walk.blocked(o.position.x, o.position.z)) { const p = walk.nearestFree(o.position); o.position.x = p.x; o.position.z = p.z; }
+}
 function travel(point, run = false, cb = null) {
   const dy = point.y - pet.position.y;
   if (Math.abs(dy) < 0.1) { pet.goTo(point, run, cb); return; }
@@ -939,7 +959,7 @@ addEventListener('pointerup', (e) => {
   swipe = null;
   if (dy < 40) return;
   const speed = Math.min(1, (dy / dt) / 1.6);          // px/ms → 0..1
-  throwHeld(0.35 + speed * 0.65, dx / Math.max(dy, 1));
+  throwHeld(0.08 + speed * 0.92, dx / Math.max(dy, 1));
 }, true);
 if (!('PointerEvent' in window)) console.warn('No pointer events');
 
@@ -953,7 +973,7 @@ function armFlick() {
     if (!inHand) return;
     const a = e.acceleration || {};
     const mag = Math.hypot(a.x || 0, a.y || 0, a.z || 0);
-    if (mag > 14) throwHeld(Math.min(1, 0.45 + (mag - 14) / 25), 0);
+    if (mag > 14) throwHeld(Math.min(1, 0.25 + (mag - 14) / 25), 0);
   });
 }
 
@@ -967,8 +987,8 @@ function throwHeld(power, sideways = 0) {
   const right = new THREE.Vector3(-flat.z, 0, flat.x);
   const dir = flat.clone().addScaledVector(right, THREE.MathUtils.clamp(sideways, -0.8, 0.8) * 0.6).normalize();
   // Gentler throws in the cartoon room so the ball stays on screen.
-  const sp = mode === 'play' ? 0.8 + power * 1.2 : 1.2 + power * 2.6;
-  obj.vel = dir.multiplyScalar(sp).add(new THREE.Vector3(0, mode === 'play' ? 1 + power * 0.6 : 1.2 + power * 1.4, 0));
+  const sp = mode === 'play' ? 0.8 + power * 1.2 : 0.4 + power * 3.2;
+  obj.vel = dir.multiplyScalar(sp).add(new THREE.Vector3(0, mode === 'play' ? 1 + power * 0.6 : 0.8 + power * 1.6, 0));
   if (obj.kind === 'ball') setTimeout(() => tutDone('ball'), 1500);
   obj.spin = new THREE.Vector3(Math.random() * 10, Math.random() * 10, 0);
   obj.landed = false;
@@ -993,6 +1013,17 @@ function stepThrown(dt) {
       if (o.spin) o.spin.multiplyScalar(0.6);
       if (Math.abs(o.vel.y) < 0.2) o.vel.y = 0;
       if (o.kind === 'treat') { o.rotation.set(0, o.rotation.y, 0); o.spin = null; }
+    }
+    // Bounce off real walls and cabinets the camera has seen.
+    if (mode === 'cam' && walk && o.position.y < 1.3) {
+      const dc = Math.hypot(o.position.x, o.position.z), far = dc > 3.4;
+      if (far || walk.blocked(o.position.x, o.position.z)) {
+        o.position.addScaledVector(o.vel, -dt);
+        const n = far ? [-o.position.x / dc, -o.position.z / dc] : walk.normal(o.position.x, o.position.z);
+        if (n) { const vn = o.vel.x * n[0] + o.vel.z * n[1]; if (vn < 0) { o.vel.x -= 2 * vn * n[0]; o.vel.z -= 2 * vn * n[1]; } } else { o.vel.x = -o.vel.x; o.vel.z = -o.vel.z; }
+        o.vel.x *= 0.6; o.vel.z *= 0.6;
+        if (Math.hypot(o.vel.x, o.vel.z) > 0.4) sfx.bounce(0.5);
+      }
     }
     // keep things in the preview room
     if (mode === 'play') {
@@ -1707,7 +1738,7 @@ function tick(time, frame) {
     controls.update();
   } else {
     if (mode === 'play') controls.update();
-    if (mode === 'cam') applyOrientation();
+    if (mode === 'cam') { applyOrientation(); if (walk && pet) { walk.update(dt, walk.s[walk.idx(pet.position.x, pet.position.z)] > 0.3 ? [pet.position] : []); unstick(dt); } }
     if (pet && pet.parent) {
       if (pet.popIn !== undefined && pet.popIn < 1) { pet.popIn = Math.min(1, pet.popIn + dt * 3); const s = 1 - Math.pow(1 - pet.popIn, 3) * 1; pet.scale.setScalar(Math.max(0.01, s * (1 + Math.sin(pet.popIn * Math.PI) * 0.15))); }
       pet.update(dt, camPos);
