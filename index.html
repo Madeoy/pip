@@ -153,6 +153,9 @@
     #hud.photo #toast { bottom: calc(200px + var(--safe-b)) !important; top: auto !important; }
     #peek { position: absolute; inset: 0; z-index: 7; display: flex; align-items: center; justify-content: center; background: rgba(42,26,94,.94); }
     #peekText { font-size: 44px; font-weight: 800; text-align: center; padding: 0 24px; line-height: 1.2; }
+    #hotcold { position: absolute; left: 50%; transform: translateX(-50%); top: calc(64px + var(--safe-t)); font-size: 20px; font-weight: 800; padding: 8px 18px; z-index: 5; transition: background .3s; }
+    #hotcold.hot { background: #ff5d5d; } #hotcold.warm { background: #ff9f43; } #hotcold.cool { background: #5aa9e6; } #hotcold.cold { background: #3b4c8c; }
+    #clueBtn { position: absolute; right: 12px; bottom: calc(150px + var(--safe-b)); font-size: 18px; font-weight: 800; padding: 10px 16px; background: #ffd25e; color: #3a2400; z-index: 5; }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -210,6 +213,8 @@
       <button class="pill" id="hopOutBtn" hidden style="position:absolute;left:50%;transform:translateX(-50%);top:calc(96px + var(--safe-t));font-size:18px;font-weight:800;padding:10px 20px;background:#ffd25e;color:#3a2400;z-index:5">🤲 Hop out</button>
       <div id="arrow" hidden><i></i></div>
       <div id="peek" hidden><div id="peekText">🙈</div></div>
+      <div class="pill" id="hotcold" hidden>❄️ Cold</div>
+      <button class="pill" id="clueBtn" hidden>💡 Clue</button>
       <div id="tut" hidden>
         <div style="text-align:center;font-size:12px;font-weight:800;letter-spacing:.08em;color:#7c5cff;margin-bottom:4px">🎓 TRAINING AREA</div>
         <div class="tut-dots" id="tutDots"></div>
@@ -293,6 +298,6 @@
     setTimeout(show, 12000);
   })();
   </script>
-  <script type="module" src="main.js?v=25"></script>
+  <script type="module" src="main.js?v=26"></script>
 </body>
 </html>

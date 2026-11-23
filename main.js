@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=25';
-import { HandSeer } from './hand.js?v=25';
-import { WalkMap } from './walk.js?v=25';
+import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=26';
+import { HandSeer } from './hand.js?v=26';
+import { WalkMap } from './walk.js?v=26';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'pip-pet-v1';
@@ -1650,6 +1650,26 @@ function startHide(self = false) {
   let spot;
   if (mode === 'play') {
     spot = hidingSpots[Math.floor(Math.random() * hidingSpots.length)].clone();
+  } else if (mode === 'cam') {
+    // Your room: somewhere on the floor, best of all BEHIND something the camera has seen (couch, cabinet,
+    // wall corner) — otherwise at least out of view.
+    const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
+    let best = [], bestScore = -1;
+    for (let i = 0; i < 120; i++) {
+      const a = Math.random() * Math.PI * 2, r = 1.1 + Math.random() * 2.2;
+      const q = new THREE.Vector3(cp.x + Math.sin(a) * r, floorY, cp.z - Math.cos(a) * r);
+      if (walk && !walk.free(q.x, q.z)) continue;
+      const ndc = q.clone().setY(floorY + 0.08).project(camera);
+      const outOfView = ndc.z > 1 || Math.abs(ndc.x) > 0.9 || Math.abs(ndc.y) > 0.9;
+      const behind = !!walk && !walk.clear(cp, q);
+      // Off to the side or behind you is a better hiding place than right in front.
+      const f = new THREE.Vector3(); camera.getWorldDirection(f); f.y = 0; f.normalize();
+      const offAxis = Math.acos(THREE.MathUtils.clamp((q.x - cp.x) * f.x / r + (q.z - cp.z) * f.z / r, -1, 1)) > 1.4;
+      const score = (behind ? 2 : 0) + (outOfView ? 1 : 0) + (offAxis ? 1 : 0);
+      if (score > bestScore) { bestScore = score; best = [q]; } else if (score === bestScore) best.push(q);
+    }
+    spot = best.length ? best[Math.floor(Math.random() * best.length)] : frontOfYou(1.3);
+    var hidBehind = bestScore >= 2;
   } else if (floorMap.length > 6) {
     // In your room: pick a learned floor spot that's out of sight, not too far.
     const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
@@ -1670,17 +1690,85 @@ function startHide(self = false) {
     spot = new THREE.Vector3(cp.x + dir.x * 1.3, floorY, cp.z + dir.z * 1.3);
   }
   spot.y = floorY;
+  dropFromMouth(); cleaning = false; pet.target = null; pet.onArrive = null; if (pet.state !== 'leap') pet.state = 'idle';
   emote(self ? 'Catch me!' : 'Count to 3!', '#ffd25e'); sfx.happy();
   travel(spot, true, () => { pet.state = 'hiding'; });
-  hideGame = { since: performance.now() };
-  toast(canBuzz
-    ? `${look.name} is hiding! Your phone buzzes faster when you're close. Knock knock to tag! 👀`
-    : `${look.name} is hiding! Look around to find them 👀`);
-  startHideBuzz();
+  hideGame = { since: performance.now(), ready: false, spot: spot.clone(), aimT: 0, clues: 0, behind: typeof hidBehind !== 'undefined' && hidBehind };
+  const go = () => {
+    if (!hideGame || hideGame.play) return;
+    // Didn't get there yet? It's there now.
+    if (pet.position.distanceTo(spot) > 0.1) { pet.target = null; pet.onArrive = null; pet.position.copy(spot); }
+    pet.state = 'hiding'; hideGame.ready = true; hideGame.since = performance.now();
+    $('clueBtn').hidden = false; $('hotcold').hidden = false;
+    toast(`${look.name} is hiding${hideGame.behind ? ' behind something' : ''}! Turn around and look 👀 ${canBuzz ? 'Your phone buzzes faster when you point at them. ' : ''}Stuck? Say "give me a clue" or tap 💡`);
+    startHideBuzz();
+  };
+  if (self) setTimeout(go, 2500);
+  else {
+    // Cover your eyes while it sneaks off.
+    const peek = $('peek'), txt = $('peekText');
+    const steps = ['🙈<br>Cover your eyes!', '3', '2', '1', 'Ready or not! 👀'];
+    peek.hidden = false;
+    steps.forEach((t, i) => setTimeout(() => { if (hideGame && !hideGame.play) { txt.innerHTML = t; sfx.chirp(1 + i * 0.12); } }, i * 800));
+    setTimeout(() => { peek.hidden = true; go(); }, steps.length * 800);
+  }
+}
+// ---- clues: "where are you?" / 💡 — a giggle from its direction, and words for where to look ----
+function giggleFrom(pan) {
+  try {
+    const a = audio(), p = a.createStereoPanner ? a.createStereoPanner() : null;
+    if (p) { p.pan.value = THREE.MathUtils.clamp(pan, -1, 1); p.connect(a.destination); }
+    const t = a.currentTime;
+    [0, 0.13, 0.26, 0.42].forEach((d, i) => {
+      const o = a.createOscillator(), g = a.createGain();
+      const f = 900 + i * 120 + Math.random() * 80;
+      o.type = 'triangle'; o.frequency.setValueAtTime(f, t + d); o.frequency.exponentialRampToValueAtTime(f * 1.4, t + d + 0.09);
+      g.gain.setValueAtTime(0.0001, t + d); g.gain.exponentialRampToValueAtTime(0.2, t + d + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.11);
+      o.connect(g).connect(p || a.destination); o.start(t + d); o.stop(t + d + 0.13);
+    });
+  } catch {}
+}
+function giveClue() {
+  if (!hideGame || hideGame.play) return;
+  if (!hideGame.ready) { toast('Wait… still hiding! 🙈'); return; }
+  hideGame.clues++;
+  const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
+  const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
+  const to = pet.position.clone().sub(cp); to.y = 0; const dist = to.length(); to.normalize();
+  const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
+  const ang = Math.atan2(to.dot(right), to.dot(fwd)) * 180 / Math.PI;   // + = to your right
+  const a = Math.abs(ang), side = ang > 0 ? 'right' : 'left';
+  const where = a < 25 ? 'right in front of you' : a < 70 ? `a little to your ${side}` : a < 125 ? `to your ${side}` : 'behind you!';
+  giggleFrom(Math.sin(ang * Math.PI / 180));
+  let msg = `Hehe! 🤭 Pip is ${where}`;
+  if (mode === 'ar') msg += dist < 1.2 ? ' — really close!' : dist < 2.5 ? ' — not far' : ' — far away';
+  if (hideGame.clues >= 2 && hideGame.behind) msg += '. Look behind the furniture!';
+  if (hideGame.clues >= 3) { pet.setVisibility(1); setTimeout(() => { if (hideGame?.ready) hideAlpha = 0; }, 1200); msg += ' (peeking out!)'; }
+  toast(msg.replace('Pip', look.name)); buzz([30, 40, 30]);
+}
+$('clueBtn').onclick = giveClue;
+// ---- each frame while hiding: hot/cold, invisible until you point right at it, found by aiming ----
+let hideAlpha = 1, hotLevel = '';
+function updateRoomHide(dt) {
+  if (!hideGame || hideGame.play || !hideGame.ready || !pet?.parent) return;
+  const ang = lookAngle(), dist = hideDistance();
+  const near = mode === 'ar' ? (dist < 1 ? 3 : dist < 1.8 ? 2 : dist < 3 ? 1 : 0) : (ang < 0.35 ? 3 : ang < 0.8 ? 2 : ang < 1.6 ? 1 : 0);
+  const lvl = ['cold', 'cool', 'warm', 'hot'][near];
+  if (lvl !== hotLevel) { hotLevel = lvl; const el = $('hotcold'); el.className = 'pill ' + lvl; el.textContent = { hot: '🔥 Hot!', warm: '♨️ Warmer', cool: '🌤️ Cool', cold: '❄️ Cold' }[lvl]; if (lvl === 'hot') sfx.chirp(1.6); }
+  if (mode === 'cam') {
+    // Really hidden: you can't see it until you point right at it. Then it's found.
+    const want = ang < 0.32 ? 1 : ang < 0.6 ? 0.35 * (1 - (ang - 0.32) / 0.28) : 0;
+    hideAlpha += (want - hideAlpha) * Math.min(1, dt * 5);
+    if (pet.state === 'hiding') pet.setVisibility(Math.max(0, hideAlpha));
+    hideGame.aimT = ang < 0.3 ? hideGame.aimT + dt : 0;
+    if (hideGame.aimT > 0.7) foundPet();
+  }
 }
 function foundPet() {
   const wasPlay = hideGame?.play, pick = hideGame?.pick;
   hideGame = null; $('arrow').hidden = true; stopHideBuzz(); $('peek').hidden = true;
+  $('clueBtn').hidden = true; $('hotcold').hidden = true; hotLevel = ''; hideAlpha = 1;
+  if (!wasPlay && pet) { pet.setVisibility(1); pet.scale.setScalar(0.01); pet.popIn = 0; hearts.burst(pet.localToWorld(new THREE.Vector3(0, 0.2, 0)), 8); }
   if (wasPlay) {
     const q = hideProps?.[pick];
     if (q) { const t0 = performance.now(); const lift = () => { const e = Math.min(1, (performance.now() - t0) / 350); q.position.y = e * 0.12; q.rotation.z = e * 0.5; if (e < 1) requestAnimationFrame(lift); }; lift(); }
@@ -1712,7 +1800,7 @@ function startHideBuzz() {
     if (!hideGame) return;
     // Nobody looking? After a while it gives up and comes out.
     if (performance.now() - hideGame.since > 75000) {
-      hideGame = null; $('arrow').hidden = true; pet.state = 'idle'; pet.setVisibility(1); removeHideProps(); $('peek').hidden = true;
+      hideGame = null; $('arrow').hidden = true; pet.state = 'idle'; pet.setVisibility(1); removeHideProps(); $('peek').hidden = true; $('clueBtn').hidden = true; $('hotcold').hidden = true; hotLevel = '';
       emote('here I am!', '#ffd25e'); travel(frontOfYou(0.4), true, () => pet.happy(2)); return;
     }
     const d = mode === 'ar' ? hideDistance() : mode === 'cam' ? 0.6 + lookAngle() * 1.3 : 1.5;
@@ -1762,7 +1850,7 @@ $('hideBtn').onclick = () => { armKnock(); if (!hideGame) doTrick('hide', true);
 
 function checkFound() {
   // On screen, you find it by tapping it; in your room, by looking at it.
-  if (!hideGame || pet.state !== 'hiding' || mode === 'play') return;
+  if (!hideGame || pet.state !== 'hiding' || mode === 'play' || mode === 'cam' || !hideGame.ready) return;
   // Found when it's near the middle of your view and reasonably close.
   const p = pet.localToWorld(new THREE.Vector3(0, 0.08, 0)).project(camera);
   const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
@@ -1774,6 +1862,7 @@ function checkFound() {
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, listening = false;
 const COMMANDS = [
+  [/\b(clue|hint|where are you|where r u|marco|help me find|i give up|where is|where's)\b/, 'clue'],
   [/\b(take a (picture|photo|pic|selfie)|picture|photo|selfie|say cheese|cheese|smile|snap)\b/, 'photo'],
   [/\b(hop up|climb up|jump up|get up|up there|up on|on the (table|couch|sofa|chair|seat)|onto the)\b/, 'up'],
   [/\b(hop in|hop on (my )?hand|climb in|climb on (my )?hand|jump in|in my hand|up you go|get in)\b/, 'hopin'],
@@ -1832,7 +1921,7 @@ function recall() {
   if (petInHand) { hopOut(); setTimeout(recall, 900); return; }
   // Drop whatever it was doing.
   if (hideGame) { hideGame = null; stopHideBuzz(); $('arrow').hidden = true; }
-  removeHideProps(); $('peek').hidden = true;
+  removeHideProps(); $('peek').hidden = true; $('clueBtn').hidden = true; $('hotcold').hidden = true; hotLevel = ''; hideAlpha = 1;
   stayMode = false; zoomUntil = 0; cleaning = false; wantsPat = 0; dropFromMouth();
   pocketScale = 1; pet.setVisibility(1); occl = 1;
   if (pet.state === 'sleep') { pet.inBed = false; emote('*yawn*'); }
@@ -1870,6 +1959,7 @@ function onSpeech(text) {
   // "Come" always works — from a nap, from hiding, from anywhere.
   if (cmd === 'come') { recall(); return; }
   if (pet.state === 'sleep' && !['wake', 'praise', 'buttons'].includes(cmd)) { emote('z z z'); return; }
+  if (cmd === 'clue') { if (hideGame && !hideGame.play) giveClue(); else if (hideGame?.play) toast('Tap the box, drum or bush! 👆'); else { emote('?'); } return; }
   if (hideGame && cmd !== 'praise') { emote('shh!'); return; }
   const moves = ['come', 'fetch', 'getball', 'follow', 'hide', 'up', 'off', 'water', 'food', 'cleanup', 'treat', 'sleep'];
   if (petInHand && moves.includes(cmd)) { hopOut(); setTimeout(() => onSpeech(text), 900); return; }
@@ -2057,7 +2147,7 @@ function trackWalking(dt) {
 function setNames() { $('petName').textContent = look.name; document.querySelectorAll('.pn').forEach((e) => (e.textContent = look.name)); }
 $('exitBtn').onclick = () => {
   exitPhoto();
-  stopListening(); clearThrown(); hideGame = null; $('arrow').hidden = true; removeHideProps(); $('peek').hidden = true; endTutorial(); controls.enabled = true;
+  stopListening(); clearThrown(); hideGame = null; $('arrow').hidden = true; removeHideProps(); $('peek').hidden = true; $('clueBtn').hidden = true; $('hotcold').hidden = true; hotLevel = ''; hideAlpha = 1; endTutorial(); controls.enabled = true;
   if (mode === 'ar') { renderer.xr.getSession()?.end(); return; }
   if (mode === 'cam') stopCam();
   stopHideBuzz(); pet.setVisibility(1); placed = false; setWalk(false); setVoiceOnly(false);
@@ -2074,7 +2164,7 @@ const isTouch = matchMedia('(pointer: coarse)').matches;
 
 function updateArrow() {
   const el = $('arrow');
-  if (!pet || !(mode === 'play' || placed) || !pet.parent) { el.hidden = true; return; }
+  if (!pet || !(mode === 'play' || placed) || !pet.parent || hideGame) { el.hidden = true; return; }
   const p = pet.localToWorld(new THREE.Vector3(0, 0.08, 0)).project(camera);
   const behind = p.z > 1;
   const off = behind || Math.abs(p.x) > 1 || Math.abs(p.y) > 1;
@@ -2201,6 +2291,7 @@ function tick(time, frame) {
     }
     stepThrown(dt);
     checkFound();
+    updateRoomHide(dt);
     updateNeeds(dt); updateMeters(dt);
     trackWalking(dt);
     if (pet?.parent) {
