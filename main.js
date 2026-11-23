@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=10';
-import { HandSeer } from './hand.js?v=10';
+import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=11';
+import { HandSeer } from './hand.js?v=11';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'pip-pet-v1';
@@ -394,7 +394,7 @@ function applyOrientation() {
 }
 function stopCam() {
   hand?.stop(); for (const o of handBalls.splice(0)) removeThrown(o);
-  petInHand = false; pocketScale = 1; pet.scale.setScalar(1); stayMode = false;
+  petInHand = false; pocketScale = 1; pet.scale.setScalar(1); stayMode = false; $('hopOutBtn').hidden = true;
   zoom = 1; for (const el of [$('camfeed'), canvas]) el.style.transform = '';
   removeEventListener('deviceorientation', onOrient); orient = null;
   camStream?.getTracks().forEach((t) => t.stop()); camStream = null; $('camfeed').hidden = true;
@@ -830,7 +830,7 @@ function hopIn() {
   travel(frontOfYou(0.4), true, () => {
     if (!hand?.visible) { emote('where’s your hand?'); return; }
     pet.leapTo(petHandPoint(), () => {
-      petInHand = true; stayMode = true; pet.state = 'sit'; pet.faceYaw = null;
+      petInHand = true; stayMode = true; pet.state = 'sit'; pet.faceYaw = null; $('hopOutBtn').hidden = false;
       pocketSize(true);
       emote('♥ comfy!', '#ff7eb3'); sfx.joy(); buzz([20, 30, 20]);
       toast(`${look.name} is in your hand! Walk around — say "hop out" to put them down`);
@@ -838,8 +838,9 @@ function hopIn() {
   });
 }
 function hopOut() {
-  if (!petInHand) { emote('?'); return; }
-  petInHand = false; stayMode = false; pocketSize(false);
+  $('hopOutBtn').hidden = true;
+  if (!petInHand) { stayMode = false; pocketSize(false); if (pet.state === 'sit') pet.state = 'idle'; return; }
+  petInHand = false; stayMode = false; pocketSize(false); $('hopOutBtn').hidden = true; petHandLostAt = 0;
   const spot = frontOfYou(0.5); spot.y = floorY;
   pet.leapTo(spot, () => { pet.hop(); emote('wheee!', '#ffd25e'); sfx.happy(); });
 }
@@ -864,6 +865,7 @@ function updatePetInHand(dt) {
   if (pet.state !== 'trick' && pet.state !== 'happy') pet.state = 'sit';
 }
 
+$('hopOutBtn').onclick = () => hopOut();
 function startHandSeer() {
   if (mode !== 'cam') return;
   if (!hand) hand = new HandSeer($('camfeed'));
@@ -1237,7 +1239,7 @@ const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, listening = false;
 const COMMANDS = [
   [/\b(hop in|hop on|climb in|climb on|jump in|up you go|get in)\b/, 'hopin'],
-  [/\b(hop out|climb out|hop off|hop down|jump down|get out|down you go)\b/, 'hopout'],
+  [/\b(hop out|hop off|hop down|climb out|climb off|climb down|get out|get off|jump out|jump down|all done|i'm done|im done|put you down|down you go|out you go)\b/, 'hopout'],
   [/\b(show (the )?(buttons|controls)|buttons)\b/, 'buttons'],
   [/\b(play catch|catch)\b/, 'fetch'],
   [/\b(follow|follow me|let's go|lets go|walk|heel)\b/, 'follow'],
@@ -1299,7 +1301,7 @@ function onSpeech(text) {
     case 'praise': sfx.happy(); pet.happy(2); emote('♥', '#ff7eb3'); praise(); return;
     case 'wake': wakeUp(); return;
     case 'stay': stayMode = true; zoomUntil = 0; pet.target = null; pet.faceYaw = null; pet.sit(); emote('staying!'); return;
-    case 'release': stayMode = false; pet.state = 'idle'; pet.happy(1); emote('free!'); return;
+    case 'release': if (petInHand) { hopOut(); return; } stayMode = false; pet.state = 'idle'; pet.happy(1); emote('free!'); return;
     case 'fetch': (voiceOnly || follow) ? autoThrow('ball') : holdItem('ball'); emote('!!'); return;
     case 'buttons': setVoiceOnly(false); if (follow) setWalk(false); return;
     case 'getball': {

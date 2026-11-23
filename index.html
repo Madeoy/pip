@@ -118,6 +118,7 @@
     #hud.walking .dock, #hud.walking .top, #hud.walking .roomchip, #hud.walking .status, #hud.walking .heard,
     #hud.voiceonly .dock, #hud.voiceonly .top, #hud.voiceonly .roomchip, #hud.voiceonly .status, #hud.voiceonly .heard { display: none !important; }
     #hud.voiceonly.walking #walkOff { display: none !important; }
+    #hud.walking #hopOutBtn:not([hidden]), #hud.voiceonly #hopOutBtn:not([hidden]) { display: block !important; }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -157,6 +158,7 @@
       <div class="status" id="status" hidden></div>
       <div class="pill roomchip" id="roomChip" hidden>🏠 <span id="roomCount">0</span> spots learned</div>
       <div id="toast"></div>
+      <button class="pill" id="hopOutBtn" hidden style="position:absolute;left:50%;transform:translateX(-50%);top:calc(96px + var(--safe-t));font-size:18px;font-weight:800;padding:10px 20px;background:#ffd25e;color:#3a2400;z-index:5">🤲 Hop out</button>
       <div id="arrow" hidden><i></i></div>
       <p class="heard" id="heard">Tap 🎤 and talk to <b class="pn">Pip</b></p>
       <div class="dock" id="dock">
@@ -181,6 +183,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="main.js?v=10"></script>
+  <script type="module" src="main.js?v=11"></script>
 </body>
 </html>
