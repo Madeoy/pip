@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=18';
-import { HandSeer } from './hand.js?v=18';
-import { WalkMap } from './walk.js?v=18';
+import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=19';
+import { HandSeer } from './hand.js?v=19';
+import { WalkMap } from './walk.js?v=19';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'pip-pet-v1';
@@ -372,8 +372,8 @@ async function startAR() {
     depthSensing: { usagePreference: ['cpu-optimized', 'gpu-optimized'], dataFormatPreference: ['luminance-alpha', 'float32'] } };
   const session = await navigator.xr.requestSession('immersive-ar', withDepth)
     .catch(() => navigator.xr.requestSession('immersive-ar', base))
-    .catch((e) => { toast('AR could not start: ' + e.message); return null; });
-  if (!session) return;
+    .catch(() => null);
+  if (!session) { xrOK = false; return startCam(); }   // full AR didn't start — use camera mode instead
   camera.clearViewOffset();
   mode = 'ar'; placed = false;
   room.visible = false; shadowCatcher.visible = true; controls.enabled = false;
@@ -406,11 +406,17 @@ let depthCPU = false;
 let camStream = null, orient = null, alphaOffset = null;
 async function startCam() {
   audio().resume?.();
+  // Tilt sensors are nice to have — never let them stop the camera from starting.
+  try { const DOE = window.DeviceOrientationEvent; if (DOE && typeof DOE.requestPermission === 'function') await DOE.requestPermission(); } catch {}
   try {
-    const DOE = window.DeviceOrientationEvent;
-    if (DOE && typeof DOE.requestPermission === 'function') await DOE.requestPermission();
-    camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } }, audio: false });
-  } catch (e) { toast('Camera is needed to bring your pet into your room'); return; }
+    if (!navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error('This browser has no camera access'), { name: 'NoCamera' });
+    try {
+      camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } }, audio: false });
+    } catch (e) {
+      if (e.name === 'NotAllowedError' || e.name === 'SecurityError') throw e;
+      camStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });   // simpler ask for picky phones
+    }
+  } catch (e) { camHelp(e); return; }
   const v = $('camfeed'); v.srcObject = camStream; v.hidden = false; await v.play().catch(() => {});
   camera.clearViewOffset();
   mode = 'cam'; placed = true; floorY = 0; alphaOffset = null;
@@ -428,6 +434,19 @@ async function startCam() {
   armKnock(); setTimeout(greet, 300); startHandSeer();
   toast(`Point your phone at the floor — ${look.name} is there! Turn around to look for them.`);
 }
+function camHelp(e) {
+  const blocked = e?.name === 'NotAllowedError' || e?.name === 'SecurityError';
+  const busy = e?.name === 'NotReadableError' || e?.name === 'AbortError';
+  $('camHelpWhy').innerHTML = blocked
+    ? 'The camera is blocked for this page. To allow it:<br>1. Tap the 🔒 or ⓘ next to the web address at the top.<br>2. Tap <b>Permissions</b> (or Site settings) → <b>Camera</b> → <b>Allow</b>.<br>3. Come back and tap <b>Try again</b>.'
+    : busy ? 'Another app is using the camera. Close the other camera app, then tap <b>Try again</b>.'
+    : e?.name === 'NoCamera' ? 'This browser cannot use the camera. Try opening the page in Chrome.'
+    : 'The camera did not start. Tap <b>Try again</b>. If it keeps happening, close all tabs and reopen Pip.';
+  $('camHelpErr').textContent = `(${e?.name || 'Error'}: ${e?.message || ''})`.slice(0, 160);
+  $('camHelp').hidden = false;
+}
+$('camHelpRetry').onclick = () => { $('camHelp').hidden = true; startCam(); };
+$('camHelpTrain').onclick = () => { $('camHelp').hidden = true; startPlay(); };
 function onOrient(e) { if (e.alpha == null) return; orient = e; if (alphaOffset == null) alphaOffset = e.alpha; }
 const _euler = new THREE.Euler(), _q0 = new THREE.Quaternion(), _q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)), _z = new THREE.Vector3(0, 0, 1);
 function applyOrientation() {
@@ -1880,7 +1899,7 @@ canvas.addEventListener('webglcontextrestored', () => location.reload());
   xrOK = !!(navigator.xr && (await navigator.xr.isSessionSupported('immersive-ar').catch(() => false)));
   const hasCam = !!navigator.mediaDevices?.getUserMedia && isTouch;
   $('goAR').hidden = !(xrOK || hasCam);
-  if (xrOK || hasCam) { $('goPlay').className = 'big alt'; $('goPlay').textContent = 'Play in the cartoon room'; }
+  if (xrOK || hasCam) { $('goPlay').className = 'big alt'; $('goPlay').textContent = '🎓 Training area'; }
   $('arNote').textContent = xrOK ? 'Full AR: your pet walks on your real floor and learns your room.'
     : hasCam ? 'Uses your camera. (Full AR needs Chrome + Google Play Services for AR.)'
     : 'Open this on your phone to bring your pet into your room.';
