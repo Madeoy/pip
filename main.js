@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=21';
-import { HandSeer } from './hand.js?v=21';
-import { WalkMap } from './walk.js?v=21';
+import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=22';
+import { HandSeer } from './hand.js?v=22';
+import { WalkMap } from './walk.js?v=22';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'pip-pet-v1';
@@ -479,7 +479,7 @@ function learnFloor(p) {
 }
 let nextRoam = 8;
 function maybeRoam(dt) {
-  if (stayMode || (mode !== 'ar' && mode !== 'cam') || !placed || pet.state !== 'idle' || pet.target || hideGame || inHand || sick || needs.energy < 25) return;
+  if (stayMode || photoMode || (mode !== 'ar' && mode !== 'cam') || !placed || pet.state !== 'idle' || pet.target || hideGame || inHand || sick || needs.energy < 25) return;
   nextRoam -= dt; if (nextRoam > 0) return;
   nextRoam = 7 + Math.random() * 10;
   const near = floorMap.filter((q) => q.distanceTo(pet.position) < 2.5 && q.distanceTo(pet.position) > 0.4);
@@ -686,7 +686,7 @@ function petIsClose() {
 function maybeCuddle(dt) {
   if (pats && !wantsPat && performance.now() - lastPatAt > 4000) pats = 0;
   if (wantsPat && performance.now() > wantsPat) { wantsPat = 0; emote('aww…'); }
-  if (wantsPat || hideGame || stayMode || inHand || sick || pet.state !== 'idle' || pet.target) return;
+  if (wantsPat || hideGame || stayMode || photoMode || inHand || sick || pet.state !== 'idle' || pet.target) return;
   nextCuddle -= dt; if (nextCuddle > 0) return;
   nextCuddle = 45 + Math.random() * 45;
   if (needs.fun > 85 && Math.random() < 0.5) return;
@@ -704,7 +704,7 @@ function greet() {
   } else { emote('Hi!'); pet.happy(2); }
 }
 function puppyQuirks(dt) {
-  if (stayMode || hideGame || inHand || wantsPat || pet.state !== 'idle' || pet.target) return;
+  if (stayMode || photoMode || hideGame || inHand || wantsPat || pet.state !== 'idle' || pet.target) return;
   nextQuirk -= dt; if (nextQuirk > 0) return;
   nextQuirk = 8 + Math.random() * 10;
   const r = Math.random();
@@ -722,7 +722,26 @@ function puppyQuirks(dt) {
 
 /* ---------------- zoom in on the pet when you look down at it ---------------- */
 let zoom = 1, zoomOrigin = { x: innerWidth / 2, y: innerHeight / 2 };
+function updatePhotoZoom(dt) {
+  zoom = 1; canvas.style.transform = '';
+  const W = innerWidth, H = innerHeight, z = photoZoom;
+  // Where is the pet on the un-zoomed screen? Follow it smoothly.
+  if (pet?.parent) {
+    _pcam.copy(camera, false); _pcam.clearViewOffset(); _pcam.updateProjectionMatrix(); _pcam.updateMatrixWorld();
+    const p = pet.localToWorld(new THREE.Vector3(0, 0.15, 0)).project(_pcam);   // aim at the face
+    if (p.z < 1) { photoC.x += ((p.x + 1) / 2 * W - photoC.x) * Math.min(1, dt * 4); photoC.y += ((1 - p.y) / 2 * H - photoC.y) * Math.min(1, dt * 4); }
+  }
+  // Keep the zoomed window inside the screen.
+  photoC.x = Math.min(W - W / (2 * z), Math.max(W / (2 * z), photoC.x));
+  photoC.y = Math.min(H - H / (2 * z), Math.max(H / (2 * z), photoC.y));
+  const v = $('camfeed');
+  if (z > 1.001) {
+    camera.setViewOffset(W, H, photoC.x - W / (2 * z), photoC.y - H / (2 * z), W / z, H / z);
+    v.style.transformOrigin = '0 0'; v.style.transform = `translate(${(W / 2 - photoC.x * z).toFixed(1)}px, ${(H / 2 - photoC.y * z).toFixed(1)}px) scale(${z.toFixed(3)})`;
+  } else { camera.clearViewOffset(); v.style.transform = ''; }
+}
 function updateZoom(dt) {
+  if (photoMode) { updatePhotoZoom(dt); return; }
   let want = 1;
   if (mode === 'cam' && pet?.parent && pet.visible && !petInHand && pet.state !== 'leap') {
     const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd);
@@ -745,7 +764,7 @@ function unzoom(x, y) { return { x: zoomOrigin.x + (x - zoomOrigin.x) / zoom, y:
 let downAt = null;
 canvas.addEventListener('pointerdown', (e) => { downAt = { x: e.clientX, y: e.clientY, t: performance.now() }; });
 canvas.addEventListener('pointerup', (e) => {
-  if (!downAt || (mode !== 'play' && mode !== 'cam')) return;
+  if (!downAt || photoMode || (mode !== 'play' && mode !== 'cam')) return;
   const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
   if (moved < 8 && performance.now() - downAt.t < 400) {
     const ray = new THREE.Raycaster();
@@ -814,6 +833,45 @@ let placingBowls = null;
 
 /* ---------------- photo: Pip smiles, you save the picture ---------------- */
 let snapNext = false, snapping = false;
+// Photo mode: a viewfinder that zooms in on the pet. The 3D view renders just the zoomed part (stays sharp)
+// and the camera picture is scaled to match. photoC = the spot (screen px, unzoomed) the zoom centres on.
+var photoMode = false, photoZoom = 1, photoBaseFov = 55;
+const photoC = { x: innerWidth / 2, y: innerHeight / 2 }, _pcam = new THREE.PerspectiveCamera();
+function enterPhoto() {
+  if (mode === 'ar') { takePhoto(); return; }   // full AR has its own camera; just snap
+  photoMode = true; photoBaseFov = camera.fov;
+  $('hud').classList.add('photo'); $('photoUI').hidden = false; setNames();
+  setPhotoZoom(1);
+  if (pet && !petInHand && pet.state === 'idle') { pet.target = null; pet.faceYaw = null; pet.sit(); }
+}
+function exitPhoto() {
+  if (!photoMode) return;
+  setPhotoZoom(1); photoMode = false;
+  camera.clearViewOffset(); camera.fov = photoBaseFov; camera.updateProjectionMatrix();
+  $('camfeed').style.transform = '';
+  $('hud').classList.remove('photo'); $('photoUI').hidden = true;
+}
+function setPhotoZoom(z) {
+  photoZoom = Math.max(1, Math.min(4, z));
+  for (const b of document.querySelectorAll('#zoomBtns button')) b.classList.toggle('on', Math.abs(+b.dataset.z - photoZoom) < 0.25);
+}
+for (const b of document.querySelectorAll('#zoomBtns button')) b.onclick = () => { setPhotoZoom(+b.dataset.z); sfx.chirp(1 + +b.dataset.z * 0.1); };
+$('shutterBtn').onclick = takePhoto;
+$('photoExit').onclick = exitPhoto;
+// Pinch with two fingers to zoom.
+const pinchPts = new Map(); let pinchStart = null;
+const pinchDist = () => { const [a, b] = [...pinchPts.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+canvas.addEventListener('pointerdown', (e) => {
+  if (!photoMode) return;
+  pinchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinchPts.size === 2) pinchStart = { d: pinchDist(), z: photoZoom };
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!photoMode || !pinchPts.has(e.pointerId)) return;
+  pinchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinchStart && pinchPts.size === 2) setPhotoZoom(pinchStart.z * pinchDist() / Math.max(20, pinchStart.d));
+});
+for (const ev of ['pointerup', 'pointercancel']) canvas.addEventListener(ev, (e) => { pinchPts.delete(e.pointerId); if (pinchPts.size < 2) pinchStart = null; });
 function takePhoto() {
   if (!pet || snapping) return;
   const p = pet.position.clone().project(camera);
@@ -828,8 +886,11 @@ function grabPhoto() {
   const W = canvas.width, H = canvas.height, out = document.createElement('canvas'); out.width = W; out.height = H;
   const g = out.getContext('2d'), v = $('camfeed');
   if (!v.hidden && v.videoWidth) {
-    const sc = Math.max(W / v.videoWidth, H / v.videoHeight), sw = W / sc, sh = H / sc;
-    g.drawImage(v, (v.videoWidth - sw) / 2, (v.videoHeight - sh) / 2, sw, sh, 0, 0, W, H);
+    const pz = photoMode ? photoZoom : 1, k = W / innerWidth;
+    const sc = Math.max(W / v.videoWidth, H / v.videoHeight), sw = W / sc / pz, sh = H / sc / pz;
+    // The same part of the camera picture you see in the zoomed viewfinder.
+    const x0 = (v.videoWidth - W / sc) / 2 + (photoC.x * k - W / (2 * pz)) / sc, y0 = (v.videoHeight - H / sc) / 2 + (photoC.y * k - H / (2 * pz)) / sc;
+    g.drawImage(v, pz > 1 ? x0 : (v.videoWidth - sw) / 2, pz > 1 ? y0 : (v.videoHeight - sh) / 2, sw, sh, 0, 0, W, H);
   } else { g.fillStyle = getComputedStyle(document.body).backgroundColor || '#2a1f4a'; g.fillRect(0, 0, W, H); }
   g.drawImage(canvas, 0, 0, W, H);
   for (const e of emotes.children) e.visible = true;
@@ -847,7 +908,7 @@ function grabPhoto() {
     $('snapClose').onclick = () => { $('snapView').hidden = true; URL.revokeObjectURL(url); };
   }, 'image/png');
 }
-$('photoBtn').onclick = takePhoto;
+$('photoBtn').onclick = enterPhoto;
 // Bowls stay where you put them. Ask again and they get refilled.
 function feed(which) {
   if (!pet?.parent) return;
@@ -1741,6 +1802,7 @@ function trackWalking(dt) {
 /* ---------------- HUD ---------------- */
 function setNames() { $('petName').textContent = look.name; document.querySelectorAll('.pn').forEach((e) => (e.textContent = look.name)); }
 $('exitBtn').onclick = () => {
+  exitPhoto();
   stopListening(); clearThrown(); hideGame = null; $('arrow').hidden = true; endTutorial(); controls.enabled = true;
   if (mode === 'ar') { renderer.xr.getSession()?.end(); return; }
   if (mode === 'cam') stopCam();
@@ -1900,7 +1962,7 @@ function tick(time, frame) {
     if (bowl && bowl.pop !== undefined && bowl.pop < 1) { bowl.pop = Math.min(1, bowl.pop + dt * 4); bowl.scale.setScalar(Math.max(0.01, bowl.pop)); }
     // Self-started mischief every so often.
     nextMischief -= dt;
-    if (mode !== 'play' && nextMischief < 0 && !stayMode && !wantsPat && pet && pet.parent && pet.state === 'idle' && !hideGame && !inHand && !sick && needs.energy > 30 && thrown.every((o) => !o.held) && (mode !== 'ar' || placed)) {
+    if (mode !== 'play' && !photoMode && nextMischief < 0 && !stayMode && !wantsPat && pet && pet.parent && pet.state === 'idle' && !hideGame && !inHand && !sick && needs.energy > 30 && thrown.every((o) => !o.held) && (mode !== 'ar' || placed)) {
       armKnock();
       nextMischief = 50 + Math.random() * 50;
       if (Math.random() < 0.5) startHide(true); else runAway();
