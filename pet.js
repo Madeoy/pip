@@ -72,10 +72,13 @@ export class Pet extends THREE.Group {
       const bk = add(new THREE.Mesh(new THREE.ConeGeometry(0.016, 0.035, 20), m('#ffb347', 0.5)), 0, 0.094, 0.095); bk.rotation.x = Math.PI / 2;
       mouthY = 0.08;
     }
-    if (opts.nose === 'black' || opts.nose === 'pink') {
+    // A piggy snout or a beak is the nose — don't stack another nose on top.
+    const ownNose = opts.snout === 'pig' || opts.snout === 'beak';
+    if (ownNose) { /* snout is the nose */ }
+    else if (opts.nose === 'black' || opts.nose === 'pink') {
       const z = opts.snout === 'dog' || opts.snout === 'bear' ? 0.105 : 0.088;
       const ns = add(ball(opts.snout === 'none' ? 0.008 : 0.011, opts.nose === 'black' ? black : pink), 0, 0.1 + (opts.snout !== 'none' ? 0.004 : 0), z); ns.scale.set(1.3, 0.9, 0.8);
-    } else if (opts.nose === 'koala') {
+    } else if (opts.nose === 'koala' && !ownNose) {
       const ns = add(ball(0.02, black), 0, 0.098, 0.084); ns.scale.set(0.9, 1.3, 0.7);
     }
     if (opts.extra === 'whiskers' || opts.extra === 'mane+whiskers') {

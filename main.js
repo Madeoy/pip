@@ -4,7 +4,11 @@ import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from
 
 const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'pip-pet-v1';
-const saved = load();
+const ROSTER_KEY = 'pip-pets-v2';
+const roster = loadRoster();
+const saved = roster.pets[roster.current] || null;
+// Ask the browser to keep our saves even when it's low on space.
+try { navigator.storage?.persist?.(); } catch {}
 
 /* ---------------- sound (tiny synth, no files) ---------------- */
 let ac = null;
@@ -103,7 +107,9 @@ let hideGame = null;               // { since }
 let nextMischief = 45;
 const skills = { come: 0.55, sit: 0.25, spin: 0.15, hop: 0.3, fetch: 0.45, hide: 0.2, sleep: 0.3, down: 0.3, stay: 0.3, jumphigh: 0.2,
   paw: 0.3, highfive: 0.2, wave: 0.15, speak: 0.4, rollover: 0.1, playdead: 0.1, beg: 0.2, bow: 0.15, dance: 0.25, sing: 0.2,
-  chasetail: 0.35, backflip: 0.05, shy: 0.2, kiss: 0.6, sniff: 0.5, shakeoff: 0.4, up: 0.35, follow: 0.6, cleanup: 0.35, ...(saved?.skills || {}) };
+  chasetail: 0.35, backflip: 0.05, shy: 0.2, kiss: 0.6, sniff: 0.5, shakeoff: 0.4, up: 0.35, follow: 0.6, cleanup: 0.35 };
+const DEFAULT_SKILLS0 = { ...skills };
+Object.assign(skills, saved?.skills || {});
 let lastSuccess = null;
 
 /* ---------------- needs: food, water, energy, happiness, tummy ---------------- */
@@ -195,7 +201,7 @@ let tab = 'animal';
 function buildCreator() {
   for (const b of document.querySelectorAll('#tabs button')) b.onclick = () => { tab = b.dataset.tab; renderTab(); };
   $('name').value = look.name;
-  $('name').oninput = () => { look.name = $('name').value.trim() || 'Pip'; };
+  $('name').oninput = () => { look.name = $('name').value.trim() || 'Pip'; persist(); };
   $('randomBtn').onclick = () => {
     const names = Object.keys(Pet.ANIMALS);
     pickAnimal(names[Math.floor(Math.random() * names.length)], false);
@@ -216,7 +222,23 @@ function renderTab() {
   const box = $('tabbody'); box.innerHTML = '';
   const label = (t) => { const l = document.createElement('div'); l.className = 'opt-label'; l.textContent = t; box.appendChild(l); };
   const grid = () => { const g = document.createElement('div'); g.className = 'grid'; box.appendChild(g); return g; };
-  if (tab === 'animal') {
+  if (tab === 'pets') {
+    label('My pets — tap to switch'); const g = grid();
+    for (const [id, d] of Object.entries(roster.pets)) {
+      const a = Pet.ANIMALS[d.look?.animal] || Pet.ANIMALS.blob;
+      g.appendChild(chip(`${a.emoji} ${d.look?.name || 'Pip'}`, () => { if (id !== roster.current) switchPet(id); }, id === roster.current));
+    }
+    g.appendChild(chip('＋ New pet', newPet));
+    label('Keep them safe'); const g2 = grid();
+    g2.appendChild(chip('💾 Save backup', backupPets));
+    const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'application/json,.json'; inp.hidden = true;
+    inp.onchange = () => inp.files[0] && restorePets(inp.files[0]); box.appendChild(inp);
+    g2.appendChild(chip('📂 Restore', () => inp.click()));
+    g2.appendChild(chip('🗑 Remove this pet', deletePet));
+    const note = document.createElement('p'); note.className = 'note'; note.style.textAlign = 'left';
+    note.textContent = 'Your pets save automatically on this phone. Save a backup to keep them if you clear your browser.';
+    box.appendChild(note);
+  } else if (tab === 'animal') {
     const g = grid();
     for (const [k, a] of Object.entries(Pet.ANIMALS)) {
       const b = document.createElement('button'); b.className = 'animal' + (look.animal === k ? ' on' : ''); b.textContent = a.emoji; b.title = k;
@@ -241,6 +263,7 @@ function swatch(c, on, fn) { const b = document.createElement('button'); b.class
 function chip(label, fn, on = false) { const b = document.createElement('button'); b.className = 'chip' + (on ? ' on' : ''); b.textContent = label; b.onclick = fn; return b; }
 function mark() { renderTab(); }
 function refreshPet() {
+  if (typeof roster !== 'undefined' && pet) setTimeout(persist, 0);
   const keep = pet ? { p: pet.position.clone(), r: pet.rotation.y } : null;
   if (pet) scene.remove(pet);
   pet = new Pet(sfx, look);
@@ -1305,8 +1328,77 @@ function updateArrow() {
 }
 
 /* ---------------- save ---------------- */
-function persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify({ look, skills, needs, sick, at: Date.now() })); } catch {} }
-function load() { try { return JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch { return null; } }
+function snapshot() { return { look: { ...look }, skills: { ...skills }, needs: { ...needs }, sick, at: Date.now(), born: roster.pets[roster.current]?.born || Date.now() }; }
+function persist() {
+  roster.pets[roster.current] = snapshot();
+  try { localStorage.setItem(ROSTER_KEY, JSON.stringify(roster)); } catch {}
+}
+function loadRoster() {
+  try {
+    const r = JSON.parse(localStorage.getItem(ROSTER_KEY) || 'null');
+    if (r?.pets && r.current) return r;
+  } catch {}
+  // First run, or upgrading from the one-pet save.
+  let old = null; try { old = JSON.parse(localStorage.getItem('pip-pet-v1') || 'null'); } catch {}
+  const id = 'p' + Date.now().toString(36);
+  return { current: id, pets: old ? { [id]: { ...old, born: Date.now() } } : {} };
+}
+const DEFAULT_SKILLS = DEFAULT_SKILLS0;
+const DEFAULT_NEEDS = { hunger: 80, thirst: 80, energy: 90, fun: 70, tummy: 0 };
+function loadPetData(d) {
+  for (const k of Object.keys(look)) delete look[k];
+  Object.assign(look, { animal: 'blob', eyes: 1, accessory: 'none', name: 'Pip', ...strip(Pet.ANIMALS.blob), ...(d?.look || {}) });
+  Object.assign(skills, DEFAULT_SKILLS, d?.skills || {});
+  Object.assign(needs, DEFAULT_NEEDS, d?.needs || {});
+  sick = !!d?.sick;
+}
+function switchPet(id) {
+  persist();
+  roster.current = id; loadPetData(roster.pets[id]);
+  $('name').value = look.name; refreshPet(); renderTab(); persist();
+}
+function newPet() {
+  persist();
+  const id = 'p' + Date.now().toString(36);
+  roster.current = id;
+  loadPetData(null);
+  const names = ['Pip', 'Mochi', 'Bean', 'Noodle', 'Pickle', 'Biscuit', 'Peanut', 'Waffles', 'Sprout', 'Bubbles'];
+  look.name = names[Object.keys(roster.pets).length % names.length];
+  roster.pets[id] = snapshot();
+  $('name').value = look.name; tab = 'animal'; refreshPet(); renderTab(); persist();
+}
+function deletePet() {
+  const ids = Object.keys(roster.pets);
+  if (ids.length <= 1) { toast('This is your only pet'); return; }
+  if (!confirm(`Say goodbye to ${look.name}? This can't be undone.`)) return;
+  delete roster.pets[roster.current];
+  roster.current = Object.keys(roster.pets)[0];
+  loadPetData(roster.pets[roster.current]); $('name').value = look.name; refreshPet(); renderTab();
+  try { localStorage.setItem(ROSTER_KEY, JSON.stringify(roster)); } catch {}
+}
+// Backup to a file, and restore from one (in case the browser's data gets cleared).
+async function backupPets() {
+  persist();
+  const blob = new Blob([JSON.stringify({ app: 'pip', version: 2, ...roster }, null, 1)], { type: 'application/json' });
+  const file = new File([blob], 'my-pip-pets.json', { type: 'application/json' });
+  try { if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: 'My Pip pets' }); return; } } catch {}
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'my-pip-pets.json'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+function restorePets(file) {
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const d = JSON.parse(r.result);
+      if (d.app !== 'pip' || !d.pets) throw new Error('not a Pip backup');
+      Object.assign(roster.pets, d.pets);
+      roster.current = d.current && d.pets[d.current] ? d.current : Object.keys(d.pets)[0];
+      loadPetData(roster.pets[roster.current]); $('name').value = look.name; refreshPet(); tab = 'pets'; renderTab(); persist();
+      toast(`Welcome back, ${look.name}! 💖`);
+    } catch (e) { toast("That file isn't a Pip backup"); }
+  };
+  r.readAsText(file);
+}
 
 /* ---------------- main loop ---------------- */
 const clock = new THREE.Clock();
@@ -1381,8 +1473,17 @@ addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; cam
 function frameCamera(which) {
   const portrait = innerHeight > innerWidth;
   if (which === 'create') {
-    camera.position.set(0, 0.18, portrait ? 0.78 : 0.62); controls.target.set(0, 0.08, 0);
-    if (portrait) camera.setViewOffset(innerWidth, innerHeight, 0, innerHeight * 0.2, innerWidth, innerHeight); else camera.clearViewOffset();
+    const H = innerHeight, W = innerWidth;
+    const top = (document.querySelector('#create .title h1')?.getBoundingClientRect().bottom || 50) + 6;
+    const bottom = (document.querySelector('.creator')?.getBoundingClientRect().top || H * 0.6) - 6;
+    const freeH = Math.max(120, bottom - top), yc = top + freeH / 2;
+    const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    // The pet with ears, hats and tails is about 0.34m tall and 0.36m wide; leave a margin.
+    const dh = 0.36 * H / (freeH * 2 * tanHalf);
+    const dw = 0.4 / (2 * tanHalf * (W / H));
+    const d = Math.max(dh, dw, 0.45);
+    camera.position.set(0, 0.17, d); controls.target.set(0, 0.11, 0);
+    camera.setViewOffset(W, H, 0, H / 2 - yc, W, H);
   }
   // Aim below the pet so it sits in the upper-middle of the screen, clear of the bottom panel.
   else { camera.clearViewOffset(); camera.position.set(0, 0.45, portrait ? 1.1 : 0.78); controls.target.set(0, portrait ? -0.14 : -0.06, 0.06); }
@@ -1390,8 +1491,9 @@ function frameCamera(which) {
 }
 
 /* ---------------- boot ---------------- */
-frameCamera('create');
 buildCreator();
+frameCamera('create');
+document.fonts?.ready?.then(() => { if (mode === 'create') frameCamera('create'); });
 refreshPet();
 (async () => {
   xrOK = !!(navigator.xr && (await navigator.xr.isSessionSupported('immersive-ar').catch(() => false)));
