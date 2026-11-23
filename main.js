@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=23';
-import { HandSeer } from './hand.js?v=23';
-import { WalkMap } from './walk.js?v=23';
+import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=24';
+import { HandSeer } from './hand.js?v=24';
+import { WalkMap } from './walk.js?v=24';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'pip-pet-v1';
@@ -162,7 +162,9 @@ function updateNeeds(dt) {
   needTalk -= dt;
   if (needTalk < 0 && !sleeping && !hideGame) {
     needTalk = 9 + Math.random() * 6;
-    if (sick) emote(needs.thirst < 60 ? 'water…' : 'tummy hurts', '#b7d98a');
+    if (!sick && needs.thirst < 35 && bowl?.parent && askAtBowl('water')) {}
+    else if (!sick && needs.hunger < 35 && foodBowl?.parent && askAtBowl('food')) {}
+    else if (sick) emote(needs.thirst < 60 ? 'water…' : 'tummy hurts', '#b7d98a');
     else if (needs.thirst < 25) emote('thirsty…', '#5ad1e6');
     else if (needs.hunger < 25) emote('hungry… dinner?', '#ffd25e');
     else if (needs.energy < 25) emote('*yawn*');
@@ -324,7 +326,7 @@ async function startPlay() {
 const TUT = [
   { id: 'pat',   icon: '👋', text: () => `Say hi! Tap ${look.name} to give a pat.` },
   { id: 'ball',  icon: '🎾', btn: 'ballBtn', text: () => `Tap 🎾 Ball. Then swipe up to throw it.`, held: () => `Now swipe up on the screen to throw!` },
-  { id: 'food',  icon: '🥕', btn: 'waterBtn', text: () => `${look.name} is hungry. Tap 🍽️ Food for dinner.` },
+  { id: 'food',  icon: '🥕', btn: 'waterBtn', text: () => `${look.name} is hungry. Tap 🍽️ Food, then tap the floor to put the bowls down.`, held: () => `Now tap each bowl to fill it with food and water! 🥕💧` },
   { id: 'trick', icon: '🎤', btn: 'micBtn', text: () => `Teach a trick! Tap 🎤 and say “${look.name}, sit!”`, skip: 'Use a button instead' },
   { id: 'bed',   icon: '🛏️', btn: 'bedBtn', text: () => `Time for bed. Tap 🛏️ Bed.`, held: () => `Now tap a spot on the floor for the bed.` },
   { id: 'done',  icon: '🎉', text: () => `You did it! ${look.name} loves you.` },
@@ -792,6 +794,17 @@ function handleTap(ray) {
     else if (mode === 'cam') placeBed(frontOfYou(0.9));
     return;
   }
+  {
+    // Tap a bowl (or right next to it) to fill it.
+    const fp = new THREE.Vector3(), onFloor = ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -floorY), fp);
+    let best = null, bd = 0.12;
+    for (const [b, kind] of [[foodBowl, 'food'], [bowl, 'water']]) {
+      if (!b?.parent) continue;
+      const d = ray.intersectObject(b, true).length ? 0 : onFloor ? Math.hypot(fp.x - b.position.x, fp.z - b.position.z) : Infinity;
+      if (d < bd) { bd = d; best = kind; }   // the nearest bowl to your tap
+    }
+    if (best) { fillBowl(best); return; }
+  }
   if (ray.intersectObject(pet, true).length) {
     if (hideGame) return foundPet();
     if (pet.state === 'sleep') { pet.hop(); emote('!'); return; }
@@ -810,6 +823,7 @@ function handleTap(ray) {
 /* ---------------- throwing: hold an item, then swipe or flick ---------------- */
 function holdItem(kind) {
   if (inHand) { camera.remove(inHand); }
+  { const f = new THREE.Vector3(); camera.getWorldDirection(f); const l = Math.hypot(f.x, f.z); heldAim = l > 0.1 ? { x: f.x / l, z: f.z / l } : null; }
   let obj;
   if (kind === 'ball' && handBalls.length) { obj = handBalls.pop(); removeThrown(obj); obj.held = false; obj.userHeld = false; obj.scale.setScalar(1); obj.rotation.set(0, 0, 0); }
   else obj = kind === 'treat' ? makeTreat() : new Ball();
@@ -970,12 +984,72 @@ function feed(which) {
   if (!pet?.parent) return;
   const have = which === 'food' ? foodBowl?.parent : which === 'water' ? bowl?.parent : (foodBowl?.parent || bowl?.parent);
   if (!have) { placingBowls = which; placingUp = false; toast(`Tap the floor where ${which === 'water' ? 'the water bowl' : which === 'food' ? 'the food bowl' : 'the food & water bowls'} should go`); return; }
-  if (which !== 'water' && foodBowl?.parent) { foodBowl.food.visible = true; foodBowl.food.scale.setScalar(1); }
-  if (which !== 'food' && bowl?.parent) bowl.water.scale.setScalar(1);
-  sfx.chirp(0.8); setTimeout(() => tutDone('food'), 2500);
-  if (pet.state === 'sleep') { emote('z z z'); return; }
-  if (petInHand) { hopOut(); setTimeout(() => goEatOrDrink(which), 900); return; }
-  setTimeout(() => goEatOrDrink(which), 400);
+  if (which !== 'water' && foodBowl?.parent) fillBowl('food');
+  if (which !== 'food' && bowl?.parent) setTimeout(() => fillBowl('water'), which === 'both' && foodBowl?.parent ? 700 : 0);
+}
+// Pour food or water into a bowl, with a little show; then the pet gets excited and comes running.
+function bowlEmpty(kind) { return kind === 'food' ? !foodBowl.food.visible : !bowl.water.visible; }
+function fillBowl(kind) {
+  const b = kind === 'food' ? foodBowl : bowl; if (!b?.parent) return;
+  if (!bowlEmpty(kind) || b.filling) { emote(kind === 'food' ? "it's full!" : 'still have water!'); return; }
+  b.filling = true; tutDone('food');
+  const top = b.position.clone().add(new THREE.Vector3(0, 0.28, 0));
+  const colors = kind === 'food' ? ['#ff7a1a', '#5ac84a', '#2f9e44'] : ['#5ad1e6', '#8fe3f2'];
+  const t0 = performance.now(), dur = kind === 'food' ? 1100 : 1300;
+  if (kind === 'food') { b.food.visible = true; b.food.scale.setScalar(0.05); }
+  else { b.water.visible = true; b.water.scale.setScalar(0.2); b.water.position.y = 0.006; }
+  // Bits falling in from above.
+  for (let i = 0; i < 9; i++) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(kind === 'food' ? 0.007 : 0.005, 8, 6), new THREE.MeshStandardMaterial({ color: colors[i % colors.length], roughness: 0.4 }));
+    m.position.copy(top).add(new THREE.Vector3((Math.random() - 0.5) * 0.03, Math.random() * 0.05, (Math.random() - 0.5) * 0.03));
+    m.visible = false; scene.add(m);
+    const start = i * dur / 11;
+    const fall = () => {
+      const e = performance.now() - t0 - start;
+      if (e < 0) return requestAnimationFrame(fall);
+      m.visible = true; const p = Math.min(1, e / 320);
+      m.position.y = top.y - p * p * 0.26;
+      if (p < 1) requestAnimationFrame(fall); else { scene.remove(m); m.geometry.dispose(); m.material.dispose(); }
+    };
+    fall();
+  }
+  // Sounds: kibble rattle or glug-glug.
+  for (let i = 0; i < 8; i++) {
+    if (kind === 'food') tone(1400 + Math.random() * 900, 900, 0.03, 'square', 0.05, i * 0.12);
+    else tone(260 + (i % 2) * 60 + i * 12, 200, 0.12, 'sine', 0.14, i * 0.15);
+  }
+  const grow = () => {
+    const p = Math.min(1, (performance.now() - t0) / dur);
+    if (kind === 'food') b.food.scale.setScalar(Math.max(0.05, p));
+    else { b.water.scale.setScalar(0.2 + p * 0.8); b.water.position.y = 0.006 + p * 0.018; }
+    if (p < 1) return requestAnimationFrame(grow);
+    b.filling = false;
+    petSeesFood(kind);
+  };
+  grow();
+}
+function petSeesFood(kind) {
+  if (!pet?.parent || pet.state === 'sleep' || hideGame) { if (pet?.state === 'sleep') emote('z z z'); return; }
+  if (petInHand) { hopOut(); setTimeout(() => petSeesFood(kind), 900); return; }
+  dropFromMouth(); cleaning = false; pet.target = null; pet.onArrive = null; if (pet.state !== 'leap') pet.state = 'idle';
+  pet.happy(3); sfx.happy();
+  emote(kind === 'food' ? ['dinner!! 🥕', 'yum yum!', 'food!!'][Math.floor(Math.random() * 3)] : ['water! 💧', 'slurp time!'][Math.floor(Math.random() * 2)], kind === 'food' ? '#ffd25e' : '#5ad1e6');
+  setTimeout(() => goEatOrDrink(kind), 1100);
+}
+// When hungry or thirsty, it goes and sits by its empty bowl and asks you.
+function askAtBowl(kind) {
+  const b = kind === 'food' ? foodBowl : bowl;
+  if (!b?.parent || !bowlEmpty(kind) || pet.target || pet.state !== 'idle' || stayMode || photoMode || petInHand) return false;
+  emote(kind === 'food' ? 'hungry…' : 'thirsty…', kind === 'food' ? '#ffd25e' : '#5ad1e6');
+  travel(b.position.clone().setY(floorY).add(new THREE.Vector3(0.07, 0, 0.07)), false, () => {
+    pet.sit(); pet.faceYaw = null; emote('empty… 🥺', '#ff7eb3'); sfx.confused();
+    // Nudges the bowl with its nose.
+    const t0 = performance.now();
+    const wob = () => { const e = (performance.now() - t0) / 600; b.rotation.z = Math.sin(e * 18) * 0.12 * (1 - e); if (e < 1) requestAnimationFrame(wob); else b.rotation.z = 0; };
+    setTimeout(wob, 400);
+    toast(`${look.name}'s ${kind === 'food' ? 'food' : 'water'} bowl is empty. Tap it to fill it!`);
+  });
+  return true;
 }
 function removeBowls() {
   let any = false;
@@ -987,17 +1061,20 @@ let foodBowl = null;
 function placeWater() { placeBowls('water'); }
 function placeBowls(which = 'both', at = null) {
   if (!pet?.parent) return;
-  setTimeout(() => tutDone('food'), 2500);
+  tutHeld('food');
   const front = at || frontOfYou(0.45);
   const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
   const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
   const side = new THREE.Vector3(-fwd.z, 0, fwd.x);
   const put = (obj, offset) => { scene.add(obj); obj.position.copy(front).addScaledVector(side, offset); obj.position.y = floorY; obj.scale.setScalar(0.01); obj.pop = 0; popping.add(obj); };
-  if (which !== 'water') { if (!foodBowl) foodBowl = makeFoodBowl(); foodBowl.food.visible = true; foodBowl.food.scale.setScalar(1); put(foodBowl, which === 'both' ? -0.09 : 0); }
-  if (which !== 'food') { if (!bowl) bowl = makeBowl(); bowl.water.scale.setScalar(1); put(bowl, which === 'both' ? 0.09 : 0); }
+  // Bowls go down empty; you fill them.
+  if (which !== 'water') { if (!foodBowl) foodBowl = makeFoodBowl(); foodBowl.food.visible = false; put(foodBowl, which === 'both' ? -0.09 : 0); }
+  if (which !== 'food') { if (!bowl) bowl = makeBowl(); bowl.water.visible = false; put(bowl, which === 'both' ? 0.09 : 0); }
   sfx.chirp(0.8);
-  if (pet.state === 'sleep') { emote('z z z'); return; }
-  setTimeout(() => goEatOrDrink(which), 500);
+  toast(which === 'both' ? 'Tap a bowl to fill it! 🥕 💧' : `Tap the bowl to fill it! ${which === 'food' ? '🥕' : '💧'}`);
+  if (pet.state === 'sleep') return;
+  // Comes over to sniff the new bowls.
+  setTimeout(() => { if (pet.state === 'idle' && !pet.target) { emote('ooh?'); travel(front.clone().setY(floorY).add(new THREE.Vector3(0, 0, 0.12)), false, () => { pet.trickNow?.('sniff'); }); } }, 600);
 }
 function goEatOrDrink(which) {
   if (pet.state === 'sleep' || hideGame) return;
@@ -1019,7 +1096,7 @@ function goEatOrDrink(which) {
     });
     return;
   }
-  if (!bowl?.parent) return;
+  if (!bowl?.parent || !bowl.water.visible) return;
   travel(bowl.position.clone().setY(floorY), needs.thirst < 40, () => {
     pet.state = 'eat'; emote('slurp');
     for (let i = 0; i < 5; i++) tone(500, 380, 0.07, 'sine', 0.12, i * 0.22);
@@ -1029,7 +1106,7 @@ function goEatOrDrink(which) {
       bowl.water.scale.setScalar(Math.max(0.2, 1 - p * 0.8));
       if (p < 1) return requestAnimationFrame(drink);
       needs.thirst = 100; pet.state = 'idle';
-      bowl.water.scale.setScalar(1);
+      bowl.water.visible = false; bowl.water.scale.setScalar(1);   // all gone; fill it again next time
       if (sick) { emote('need a nap…', '#b7d98a'); setTimeout(() => { if (sick && pet.state !== 'sleep') goToBedAndNap(); }, 1500); }
       else { pet.happy(1); emote('Ahh!', '#5ad1e6'); }
       if (which === 'both' && foodBowl?.parent && foodBowl.food.visible && needs.hunger < 90) setTimeout(() => goEatOrDrink('food'), 900);
@@ -1042,9 +1119,28 @@ function updatePops(dt) {
   for (const o of popping) { o.pop = Math.min(1, o.pop + dt * 4); o.scale.setScalar(Math.max(0.01, o.pop)); if (o.pop >= 1) popping.delete(o); }
 }
 
+/* ---------------- never get stuck with a ball in its mouth ---------------- */
+// If a trip gets interrupted (new throw, "come", a nap...), whatever it was carrying is dropped.
+function mouthToy() { return pet?.mouthSlot?.children.find((c) => thrown.includes(c)) || null; }
+function dropFromMouth(msg = null) {
+  const o = mouthToy(); if (!o) return null;
+  const wp = new THREE.Vector3(); o.getWorldPosition(wp);
+  pet.mouthSlot.remove(o); scene.add(o); o.position.copy(wp); o.rotation.set(0, 0, 0);
+  o.held = false; o.vel = new THREE.Vector3(0, 0.4, 0); o.landed = true;
+  if (msg) emote(msg);
+  return o;
+}
+let mouthIdle = 0;
+function checkMouth(dt) {
+  if (!pet || !mouthToy()) { mouthIdle = 0; return; }
+  const busy = pet.target || pet.state === 'leap';
+  mouthIdle = busy ? 0 : mouthIdle + dt;
+  if (mouthIdle > 1.2) { mouthIdle = 0; dropFromMouth('oops!'); sfx.bounce(0.6); }
+}
 /* ---------------- clean up your toys ---------------- */
 let toyBox = null, cleaning = false;
 function cleanUp() {
+  dropFromMouth(); pet.target = null; pet.onArrive = null; if (pet.state === 'sit' || pet.state === 'eat') pet.state = 'idle';
   const left = () => thrown.filter((o) => o.kind === 'ball' && !o.held && !o.userHeld);
   if (!left().length) { emote('all clean!'); return; }
   cleaning = true; stayMode = false; zoomUntil = 0; emote('on it!');
@@ -1207,7 +1303,7 @@ function armFlick() {
     if (e.acceleration && e.acceleration.x != null) { const a = e.acceleration; mag = Math.hypot(a.x, a.y, a.z); }
     else { const g = e.accelerationIncludingGravity || {}; mag = Math.max(0, Math.hypot(g.x || 0, g.y || 0, g.z || 0) - 9.8); }
     const now = performance.now();
-    if (!flick) { if (mag > 12) flick = { start: now, peak: mag, aim: aimHeading(now - 250) }; return; }
+    if (!flick) { if (mag > 12) flick = { start: now, peak: mag, aim: aimHeading(now - 80) }; return; }
     flick.peak = Math.max(flick.peak, mag);
     if (now - flick.start > 160) {
       const f = flick; flick = null;
@@ -1221,13 +1317,20 @@ const aimHist = [];
 function recordAim() {
   const f = new THREE.Vector3(); camera.getWorldDirection(f);
   if (Math.hypot(f.x, f.z) < 0.05) return;
-  aimHist.push({ t: performance.now(), x: f.x, z: f.z });
-  while (aimHist.length > 90) aimHist.shift();
+  const l = Math.hypot(f.x, f.z);
+  aimHist.push({ t: performance.now(), x: f.x / l, z: f.z / l, y: f.y });
+  while (aimHist.length > 360) aimHist.shift();
 }
+// Where were you aiming? The last moment (in the past 4 s) the phone was held steady, facing the room.
+// So you can face down the hall, turn sideways to wind up, and the ball still goes down the hall.
+let heldAim = null;
 function aimHeading(t) {
-  let best = null;
-  for (const h of aimHist) if (h.t <= t) best = h;
-  return best ? { x: best.x, z: best.z } : null;
+  const hs = aimHist.filter((h) => h.t <= t && h.t > t - 4000 && Math.abs(h.y) < 0.9);
+  for (let i = hs.length - 1; i >= 0; i--) {
+    const a = hs[i], win = hs.filter((h) => h.t <= a.t && h.t > a.t - 400);
+    if (win.length >= 5 && win.every((h) => h.x * a.x + h.z * a.z > 0.966)) return { x: a.x, z: a.z };
+  }
+  return heldAim || (hs.length ? { x: hs[hs.length - 1].x, z: hs[hs.length - 1].z } : null);
 }
 function throwHeld(power, sideways = 0, aim = null) {
   if (!inHand) return;
@@ -1588,7 +1691,7 @@ const COMMANDS = [
   [/\b(show (the )?(buttons|controls)|buttons)\b/, 'buttons'],
   [/\b(play catch|catch)\b/, 'fetch'],
   [/\b(follow|follow me|let's go|lets go|walk|heel)\b/, 'follow'],
-  [/\b(get (your|the) ball|go get it|bring it|get it)\b/, 'getball'],
+  [/\b((go )?(get|grab|fetch|find|bring( me)?) (your|the|my|that) (ball|toy)|go get it|bring it( back)?|get it)\b/, 'getball'],
   [/\b(roll over|roll)\b/, 'rollover'],
   [/\b(play dead|bang|dead)\b/, 'playdead'],
   [/\b(high five|hi five|high 5|five)\b/, 'highfive'],
@@ -1639,7 +1742,7 @@ function recall() {
   if (petInHand) { hopOut(); setTimeout(recall, 900); return; }
   // Drop whatever it was doing.
   if (hideGame) { hideGame = null; stopHideBuzz(); $('arrow').hidden = true; }
-  stayMode = false; zoomUntil = 0; cleaning = false; wantsPat = 0;
+  stayMode = false; zoomUntil = 0; cleaning = false; wantsPat = 0; dropFromMouth();
   pocketScale = 1; pet.setVisibility(1); occl = 1;
   if (pet.state === 'sleep') { pet.inBed = false; emote('*yawn*'); }
   pet.target = null; pet.onArrive = null; pet.state = 'idle';
@@ -1687,10 +1790,14 @@ function onSpeech(text) {
     case 'fetch': (voiceOnly || follow) ? autoThrow('ball') : holdItem('ball'); emote('!!'); return;
     case 'buttons': setVoiceOnly(false); if (follow) setWalk(false); return;
     case 'getball': {
-      const b = thrown.find((o) => o.kind === 'ball' && !o.held);
-      if (!b) { holdItem('ball'); emote('ball?'); return; }
-      if (!obey('fetch')) return;
-      emote('!'); chase(b, true); return;
+      // Goes for the ball farthest from you (the one you can't reach) and always brings it back.
+      cleaning = false; pet.target = null; pet.onArrive = null; if (pet.state !== 'leap') pet.state = 'idle';
+      const carried = dropFromMouth();
+      const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
+      const balls = thrown.filter((o) => o.kind === 'ball' && !o.held && !o.userHeld);
+      if (!balls.length) { holdItem('ball'); emote('ball?'); return; }
+      const b = carried || balls.sort((a, c) => Math.hypot(c.position.x - cp.x, c.position.z - cp.z) - Math.hypot(a.position.x - cp.x, a.position.z - cp.z))[0];
+      emote('on it!'); sfx.chirp(1.4); chase(b, true); return;
     }
     case 'treat': if (sick) { emote('no more treats…', '#b7d98a'); return; } (voiceOnly || follow) ? autoThrow('treat') : holdItem('treat'); emote('!!'); return;
     case 'hopin': hopIn(); return;
@@ -1701,7 +1808,7 @@ function onSpeech(text) {
     case 'photo': takePhoto(); return;
     case 'cleanup': cleanUp(); return;
     case 'follow': setWalk(true); return;
-    case 'sleep': if (pet.state !== 'sleep') goToBedAndNap(); return;
+    case 'sleep': if (pet.state !== 'sleep') { cleaning = false; dropFromMouth(); pet.target = null; pet.onArrive = null; if (pet.state !== 'leap') pet.state = 'idle'; goToBedAndNap(); } return;
     default: if (cmd === 'come') { zoomUntil = 0; stayMode = false; } doTrick(cmd);
   }
 }
@@ -2011,6 +2118,7 @@ function tick(time, frame) {
       if (pet.state !== 'leap' && !petInHand) shadowCatcher.position.y = pet.position.y + 0.001;
     }
     updatePops(dt);
+    checkMouth(dt);
     updateZoom(dt);
     updateHandBalls(dt);
     if (pet?.parent) updatePetInHand(dt);
@@ -2069,7 +2177,7 @@ function frameCamera(which) {
 
 addEventListener('error', (e) => { try { toast('Oops: ' + (e.message || 'something broke') + ' — say "come" to reset'); } catch {} });
 addEventListener('unhandledrejection', (e) => { console.warn(e.reason); });
-window.__pip = { get pet() { return pet; }, get thrown() { return thrown; }, THREE };  // handy for testing
+window.__pip = { get pet() { return pet; }, get thrown() { return thrown; }, get bowls() { return { food: foodBowl, water: bowl }; }, say: (t) => onSpeech(t), THREE };  // handy for testing
 /* ---------------- boot ---------------- */
 buildCreator();
 frameCamera('create');
