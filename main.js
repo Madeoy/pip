@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=14';
-import { HandSeer } from './hand.js?v=14';
+import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=15';
+import { HandSeer } from './hand.js?v=15';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'pip-pet-v1';
@@ -1390,7 +1390,8 @@ let follow = false, followTick = 0, nextZoomies = 18, zoomUntil = 0;
 var stayMode = false;
 function setWalk(on) {
   follow = on;
-  if (!on && pet) pet.faceYaw = null;
+  if (on) armSteps();
+  if (!on) stopFollowAnim();
   $('hud').classList.toggle('walking', on);
   $('walkOff').hidden = !on;
   if (on) {
@@ -1422,11 +1423,62 @@ function autoThrow(kind) {
 }
 $('walkOff').onclick = () => setWalk(false);
 
+/* ---------------- footsteps (phone motion) ---------------- */
+let walkingUntil = 0, lastWalkStop = 0, lastStep = 0, stepEnergy = 0, stepsArmed = false;
+function armSteps() {
+  if (stepsArmed) return; stepsArmed = true;
+  const DME = window.DeviceMotionEvent;
+  if (DME && typeof DME.requestPermission === 'function') DME.requestPermission().catch(() => {});
+  addEventListener('devicemotion', (e) => {
+    const a = e.acceleration || {};
+    let mag = Math.hypot(a.x || 0, a.y || 0, a.z || 0);
+    if (!e.acceleration) { const g = e.accelerationIncludingGravity || {}; mag = Math.abs(Math.hypot(g.x || 0, g.y || 0, g.z || 0) - 9.81); }
+    // Smooth bounce of walking: steady bumps of ~1.2–6 m/s², a few per second.
+    stepEnergy += (mag - stepEnergy) * 0.25;
+    const now = performance.now();
+    if (stepEnergy > 1.1 && stepEnergy < 9 && now - lastStep > 280) {
+      lastStep = now;
+      walkingUntil = now + 900;
+    }
+  });
+}
+function stopFollowAnim() { if (pet) { pet.forceWalk = false; pet.faceYaw = null; } }
+
 function updateFollow(dt) {
   if (!follow || stayMode || !pet?.parent || (mode === 'ar' && !placed)) return;
   if (hideGame || ['sleep', 'eat', 'happy', 'spin', 'hop'].includes(pet.state) || thrown.some((o) => o.held)) return;
   const now = performance.now();
   if (now < zoomUntil) return;                       // off on an adventure
+
+  // Camera mode can't see you move, so we feel your footsteps instead.
+  // While you walk, it trots beside your feet, facing where you're heading.
+  if (mode === 'cam') {
+    const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
+    const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd); fwd.y = 0;
+    if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, -1); fwd.normalize();
+    const side = new THREE.Vector3(-fwd.z, 0, fwd.x);
+    const walkingNow = now < walkingUntil;
+    if (walkingNow) {
+      if (['sit', 'down', 'trick'].includes(pet.state)) pet.state = 'idle';
+      pet.target = null; pet.onArrive = null;
+      pet.forceWalk = true; pet.speed = 0.55;
+      pet.faceYaw = Math.atan2(fwd.x, fwd.z);
+      const spot = new THREE.Vector3(cp.x, floorY, cp.z).addScaledVector(fwd, 0.85).addScaledVector(side, 0.22);
+      pet.position.lerp(spot, Math.min(1, dt * 3));
+      lastWalkStop = now;
+    } else {
+      pet.forceWalk = false;
+      // Just stopped: turn and look up at you, then sit after a moment.
+      if (now - lastWalkStop > 600) pet.faceYaw = null;
+      if (now - lastWalkStop > 2500 && pet.state === 'idle' && !pet.target && Math.random() < 0.01) pet.sit();
+      followTick -= dt; if (followTick > 0) return; followTick = 0.4;
+      const spot = new THREE.Vector3(cp.x, floorY, cp.z).addScaledVector(fwd, 0.8).addScaledVector(side, 0.2);
+      const d = Math.hypot(pet.position.x - spot.x, pet.position.z - spot.z);
+      if (d > 0.45) travel(clampToPlay(spot), d > 0.9);
+    }
+    return;
+  }
+
   followTick -= dt; if (followTick > 0) return; followTick = 0.4;
 
   // Zoomies: every so often it dashes ahead of you.

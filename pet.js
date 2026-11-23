@@ -378,6 +378,9 @@ export class Pet extends THREE.Group {
       this.rotation.y = lerpAngle(this.rotation.y, yaw, 1 - Math.exp(-dt * 3));
     }
 
+    // Walking beside you: legs keep moving even though the app moves the body.
+    if (this.forceWalk && this.state !== 'leap') walking = true;
+
     // Body animation
     let lift = 0, sx = 1, sy = 1;
     if (walking) {
