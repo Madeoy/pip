@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=11';
-import { HandSeer } from './hand.js?v=11';
+import { Pet, Ball, makeTreat, makeBowl, makeFoodBowl, makeToyBox, Hearts } from './pet.js?v=12';
+import { HandSeer } from './hand.js?v=12';
 
 const $ = (id) => document.getElementById(id);
 const SAVE_KEY = 'pip-pet-v1';
@@ -1281,6 +1281,39 @@ const COMMANDS = [
   [/\b(good|love|cute|best|great job|nice|yay|good boy|good girl)\b/, 'praise'],
   [/\b(stay|stop|wait|freeze)\b/, 'stay'],
 ];
+/* ---------------- "Pip, come!" — always brings it back to you ---------------- */
+function petOnScreen() {
+  if (!pet?.parent || !pet.visible) return false;
+  const p = pet.localToWorld(new THREE.Vector3(0, 0.08, 0)).project(camera);
+  return p.z < 1 && Math.abs(p.x) < 1 && Math.abs(p.y) < 1;
+}
+function recall() {
+  if (!pet) return;
+  if (mode === 'ar' && !placed) { toast('Tap the floor to place your pet first'); return; }
+  if (petInHand) { emote("I'm right here! ♥", '#ff7eb3'); sfx.joy(); return; }
+  // Drop whatever it was doing.
+  if (hideGame) { hideGame = null; stopHideBuzz(); $('arrow').hidden = true; }
+  stayMode = false; zoomUntil = 0; cleaning = false; wantsPat = 0;
+  pocketScale = 1; pet.setVisibility(1); occl = 1;
+  if (pet.state === 'sleep') { pet.inBed = false; emote('*yawn*'); }
+  pet.target = null; pet.onArrive = null; pet.state = 'idle';
+  if (!pet.parent) scene.add(pet);
+  const cp = new THREE.Vector3(); camera.getWorldPosition(cp);
+  const far = !Number.isFinite(pet.position.x) || Math.hypot(pet.position.x - cp.x, pet.position.z - cp.z) > 3;
+  if (far || !petOnScreen() || pet.scale.x < 0.3) {
+    // Lost it? It pops right in front of you.
+    const spot = frontOfYou(0.9); spot.y = floorY;
+    pet.position.copy(spot); pet.scale.setScalar(0.01); pet.popIn = 0;
+    hearts.burst(spot.clone().add(new THREE.Vector3(0, 0.15, 0)), 4);
+    emote("I'm here!", '#7ee08a'); sfx.happy();
+    setTimeout(() => travel(frontOfYou(0.4), true, () => { pet.hop(); success('come'); }), 600);
+  } else {
+    emote('coming!'); sfx.chirp(1.3);
+    travel(frontOfYou(0.35), true, () => { pet.hop(); success('come'); });
+  }
+}
+$('comeBtn').onclick = () => recall();
+
 function onSpeech(text) {
   const t = text.toLowerCase();
   $('heard').innerHTML = `You said: <b>${escapeHtml(text)}</b>`;
@@ -1288,11 +1321,14 @@ function onSpeech(text) {
   if (!pet || (mode === 'ar' && !placed)) return;
   const hit = COMMANDS.find(([re]) => re.test(t));
   if (!hit) {
-    if (t.includes(look.name.toLowerCase())) { emote('?'); sfx.chirp(1.2); pet.target = null; pet.state = pet.state === 'sleep' ? 'idle' : pet.state; }
+    // Just calling its name: if you can't see it, that means "come here".
+    if (t.includes(look.name.toLowerCase())) { if (!petOnScreen()) { recall(); return; } emote('?'); sfx.chirp(1.2); pet.target = null; pet.state = pet.state === 'sleep' ? 'idle' : pet.state; }
     else { emote('?'); sfx.confused(); }
     return;
   }
   const cmd = hit[1];
+  // "Come" always works — from a nap, from hiding, from anywhere.
+  if (cmd === 'come') { recall(); return; }
   if (pet.state === 'sleep' && !['wake', 'praise', 'buttons'].includes(cmd)) { emote('z z z'); return; }
   if (hideGame && cmd !== 'praise') { emote('shh!'); return; }
   const moves = ['come', 'fetch', 'getball', 'follow', 'hide', 'up', 'off', 'water', 'food', 'cleanup', 'treat', 'sleep'];
