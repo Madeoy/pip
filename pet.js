@@ -452,9 +452,11 @@ export class Pet extends THREE.Group {
     this.mouth.scale.y += (mouthOpen - this.mouth.scale.y) * 0.2;
 
     // Eyes: blink + look at camera
-    this.nextBlink -= dt;
-    const blink = this.nextBlink < 0.12 ? 0.12 : 1;
-    if (this.nextBlink < 0) this.nextBlink = 2 + Math.random() * 4;
+    // Blink: wait, then a 0.2s timer that closes and reopens the eyes (frame-rate proof).
+    if (!Number.isFinite(this.nextBlink)) this.nextBlink = 2;
+    if (this.blinkT > 0) { this.blinkT -= dt; }
+    else { this.nextBlink -= dt; if (this.nextBlink < 0) { this.blinkT = 0.2; this.nextBlink = 2 + Math.random() * 4; } }
+    const blink = this.blinkT > 0 ? 0.12 + 0.88 * Math.abs(this.blinkT / 0.1 - 1) : 1;
     const closed = this.state === 'sleep' || this.eyesShut ? 0.1 : (this.tired || this.sick) ? 0.62 : 1;
     for (const e of this.eyes) {
       e.scale.y = blink * closed * e.baseScale;
